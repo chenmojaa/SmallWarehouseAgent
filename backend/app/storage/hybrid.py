@@ -6,6 +6,12 @@ import re
 
 from app.embeddings.factory import embed_texts
 from app.storage.vector import search as vector_search
+
+# Relevance thresholds. Anything below these is treated as noise and
+# dropped before the LLM sees it, so turns like "my name is X" no
+# longer get a fake citation card.
+MIN_FINAL_SCORE = 0.18   # 0.7 * vec + 0.3 * kw
+MIN_DIM_SCORE = 0.18     # max(vec_score, kw_score)
 from app.storage.db import fts_search
 
 
@@ -41,6 +47,8 @@ def hybrid_search(
   api_key: str | None = None,
   base_url: str | None = None,
   model: str | None = None,
+  min_score: float = MIN_FINAL_SCORE,
+  min_dim_score: float = MIN_DIM_SCORE,
 ) -> list[dict]:
   """Combine vector + keyword search, dedupe, return top_k.
 
@@ -104,15 +112,28 @@ def hybrid_search(
       }
 
   # combined: vector 0.7 + keyword 0.3
-  ranked = sorted(
-    merged.values(),
-    key=lambda x: 0.7 * x["vec_score"] + 0.3 * x["kw_score"],
-    reverse=True,
-  )[:top_k]
+  scored = [
+    (
+      0.7 * v["vec_score"] + 0.3 * v["kw_score"],
+      max(v["vec_score"], v["kw_score"]),
+      v,
+    )
+    for v in merged.values()
+  ]
+  ranked = sorted(scored, key=lambda t: t[0], reverse=True)
 
   from app.storage.db import get_note_title
-  for r in ranked:
+  results = []
+  for final_s, dim_s, r in ranked:
     r["title"] = get_note_title(r["note_id"])
-    r["final_score"] = round(0.7 * r["vec_score"] + 0.3 * r["kw_score"], 4)
-
-  return ranked
+    r["final_score"] = round(final_s, 4)
+    # Relevance gate: drop pure-noise chunks so conversational queries
+    # (e.g. "my name is X") no longer get fake citation cards.
+    if final_s < min_score:
+      continue
+    if dim_s < min_dim_score:
+      continue
+    results.append(r)
+    if len(results) >= top_k:
+      break
+  return results
