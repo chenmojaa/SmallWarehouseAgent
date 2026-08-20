@@ -1,4 +1,5 @@
 import { get, postJson, deleteReq, postJsonPatch } from './client'
+import type { Citation } from './chat'
 
 export interface Session {
   id: string

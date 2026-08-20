@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select, text
 from app.config import settings
@@ -20,7 +20,7 @@ class Note(SQLModel, table=True):
   tags: Optional[str] = None
   word_count: int = 0
   chunk_count: int = 0
-  created_at: datetime = Field(default_factory=datetime.utcnow)
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
   embedded: bool = False
 
 
@@ -28,8 +28,8 @@ class ChatSession(SQLModel, table=True):
   __tablename__ = "chat_sessions"
   id: str = Field(primary_key=True)
   title: str = "新对话"
-  created_at: datetime = Field(default_factory=datetime.utcnow)
-  updated_at: datetime = Field(default_factory=datetime.utcnow)
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+  updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatMessage(SQLModel, table=True):
@@ -39,7 +39,7 @@ class ChatMessage(SQLModel, table=True):
   role: str  # user | assistant | system
   content: str
   citations_json: Optional[str] = None
-  created_at: datetime = Field(default_factory=datetime.utcnow)
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 _engine = None
@@ -263,7 +263,7 @@ def rename_session(session_id: str, title: str) -> bool:
     if not sess:
       return False
     sess.title = title[:100]
-    sess.updated_at = datetime.utcnow()
+    sess.updated_at = datetime.now(timezone.utc)
     s.add(sess)
     s.commit()
   return True
@@ -273,7 +273,7 @@ def touch_session(session_id: str) -> None:
   with get_session() as s:
     sess = s.get(ChatSession, session_id)
     if sess:
-      sess.updated_at = datetime.utcnow()
+      sess.updated_at = datetime.now(timezone.utc)
       s.add(sess)
       s.commit()
 
@@ -293,7 +293,7 @@ def append_message(session_id: str, role: str, content: str, citations: list | N
     # 同时 touch session.updated_at
     sess = s.get(ChatSession, session_id)
     if sess:
-      sess.updated_at = datetime.utcnow()
+      sess.updated_at = datetime.now(timezone.utc)
       s.add(sess)
       s.commit()
   return msg

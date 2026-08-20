@@ -1,31 +1,43 @@
 <script setup lang="ts">
-const BRAND_BLUE = "#3b82f6"
+import { computed, onMounted, ref, watch } from 'vue'
+import {
+  NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent,
+  NMessageProvider, NSpace, NText, NButton, darkTheme, lightTheme,
+} from 'naive-ui'
+import { useSettingsStore } from '@/stores/settings'
+import { useSessionsStore } from '@/stores/sessions'
+import { useModelsStore } from '@/stores/models'
+import ChatHistory from '@/components/ChatHistory.vue'
+import StreamingIndicator from '@/components/StreamingIndicator.vue'
+
+const BRAND_BLUE = '#3b82f6'
 const naiveOverrides = computed(() => ({
   common: {
     primaryColor: BRAND_BLUE,
-    primaryColorHover: "#60a5fa",
-    primaryColorPressed: "#2563eb",
+    primaryColorHover: '#60a5fa',
+    primaryColorPressed: '#2563eb',
     primaryColorSuppl: BRAND_BLUE,
     infoColor: BRAND_BLUE,
-    infoColorHover: "#60a5fa",
-    infoColorPressed: "#2563eb",
+    infoColorHover: '#60a5fa',
+    infoColorPressed: '#2563eb',
     successColor: BRAND_BLUE,
-    successColorHover: "#60a5fa",
-    successColorPressed: "#2563eb",
+    successColorHover: '#60a5fa',
+    successColorPressed: '#2563eb',
   },
 }))
-import { computed, onMounted, watch, ref } from 'vue'
-import { useSettingsStore } from '@/stores/settings'
-import { useSessionsStore } from '@/stores/sessions'
-import { NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NMessageProvider, NSpace, NText, NButton, darkTheme, lightTheme } from 'naive-ui'
-import ChatHistory from '@/components/ChatHistory.vue'
 
 const settings = useSettingsStore()
 const sessions = useSessionsStore()
+const models = useModelsStore()
 
 const naiveTheme = computed(() => settings.theme === 'light' ? lightTheme : darkTheme)
 
-onMounted(() => { settings.init(); settings.fetch(); sessions.load() })
+onMounted(() => {
+  settings.init()
+  settings.fetch()
+  sessions.load()
+  models.loadFromBackend()
+})
 
 watch(() => settings.theme, () => { /* applied via setTheme */ })
 
@@ -83,6 +95,7 @@ function toggleSider() {
           </n-layout-sider>
           <n-layout-content content-style="padding: 0; height: 100%;">
             <router-view />
+            <StreamingIndicator />
           </n-layout-content>
         </n-layout>
       </n-layout>

@@ -64,7 +64,7 @@ def _ingest(
     source_url=source_url,
     content_path=content_path,
     word_count=len(content),
-    created_at=datetime.utcnow(),
+    created_at=datetime.now(timezone.utc),
   )
   note = _save_note(note)
 
@@ -184,7 +184,7 @@ def ingest_plain(
     2) original_name without extension
     3) path basename without extension
   """
-  for enc in ("utf-8", "utf-8-sig", "gbk", "latin-1"):
+  for enc in ("utf-8", "utf-8-sig", "gbk", "gb18030", "latin-1"):
     try:
       content = open(path, "r", encoding=enc).read()
       break

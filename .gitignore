@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -44,3 +44,12 @@ Thumbs.db
 *~
 # Test scratch
 _pt.py
+
+# Local runtime data (chroma, sqlite)
+data/
+
+# Test scratch (any _* file at repo root or subdir)
+_*.html
+_*.json
+_*.png
+_*.log

@@ -26,10 +26,17 @@ export interface ChatRequest {
   embedding_base_url?: string | null
 }
 
+export interface StageEvent {
+  stage: "rag_search" | "llm_stream"
+  status: "started" | "done"
+  ms?: number
+  hits?: number
+}
+
 export interface ChatStreamEvent {
-  type: "session" | "delta" | "citations" | "done" | "error"
+  type: "session" | "delta" | "citations" | "done" | "error" | "stage"
   session_id?: string
-  data?: string | Citation[],
+  data?: string | Citation[] | StageEvent
 }
 
 // 移除 <think>...</think> 思考段落（配对的 + 未闭合的尾部）
@@ -42,7 +49,7 @@ export function stripThink(s: string): string {
     .trim()
 }
 
-export async function* chatStream(req: ChatRequest): AsyncGenerator<ChatStreamEvent> {
+export async function* chatStream(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<ChatStreamEvent> {
   const stream = streamSse("/chat", {
     messages: req.messages,
     provider: req.provider || undefined,
@@ -54,7 +61,7 @@ export async function* chatStream(req: ChatRequest): AsyncGenerator<ChatStreamEv
     reasoning_level: req.reasoning_level || undefined,
     embedding_model: req.embedding_model || undefined,
     embedding_base_url: req.embedding_base_url || undefined,
-  })
+  }, signal)
   for await (const ev of stream) {
     if (ev.data === "[DONE]") { yield { type: "done" }; return }
     if (ev.event === "session") {
@@ -64,6 +71,9 @@ export async function* chatStream(req: ChatRequest): AsyncGenerator<ChatStreamEv
       } catch {}
     } else if (ev.event === "citations") {
       try { yield { type: "citations", data: JSON.parse(ev.data) } }
+      catch {}
+    } else if (ev.event === "stage") {
+      try { yield { type: "stage", data: JSON.parse(ev.data) } }
       catch {}
     } else if (ev.event === "error") {
       yield { type: "error", data: ev.data }

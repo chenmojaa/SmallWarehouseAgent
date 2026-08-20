@@ -2,16 +2,15 @@
 from __future__ import annotations
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import select
 from sqlalchemy import text
 
 from app.storage.db import Note, get_session
-from app.storage.vector import collection_stats, delete_note_chunks
 from app.tools.ingest import ingest_url, ingest_text, ingest_pdf, ingest_image, ingest_file, _ingest
-from app.storage.vector import delete_note_chunks, add_chunks
+from app.storage.vector import add_chunks, collection_stats, delete_note_chunks
 from app.tools.chunk import chunk_text
 from app.embeddings.factory import embed_texts
 
@@ -104,6 +103,7 @@ async def api_ingest_pdf(
   import os, tempfile
   from app.config import settings
   suffix = os.path.splitext(file.filename or "")[1] or ".pdf"
+  name = file.filename or "upload.pdf"
   fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=settings.data_dir)
   os.close(fd)
   try:
@@ -139,6 +139,7 @@ async def api_ingest_image(
   import os, tempfile
   from app.config import settings
   suffix = os.path.splitext(file.filename or "")[1] or ".png"
+  name = file.filename or "upload.png"
   fd, tmp_path = tempfile.mkstemp(suffix=suffix, dir=settings.data_dir)
   os.close(fd)
   try:

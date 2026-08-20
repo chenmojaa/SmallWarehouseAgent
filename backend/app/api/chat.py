@@ -1,5 +1,7 @@
 """Chat API with per-request overrides and LangGraph streaming."""
 import json
+import logging
+import time
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -11,6 +13,7 @@ from app.agent.nodes.retrieve import retrieve_node
 from app.agent.nodes.answer import answer_node_stream
 
 router = APIRouter(tags=["chat"])
+_log = logging.getLogger("chat")
 
 
 class Message(BaseModel):
@@ -38,6 +41,10 @@ def _extract_query(messages: list[Message]) -> str:
   return ""
 
 
+def _sse(event: str, payload) -> str:
+  return "event: " + event + chr(10) + "data: " + json.dumps(payload, ensure_ascii=False) + chr(10) + chr(10)
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-API-Key")):
   if not body.messages:
@@ -59,7 +66,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
   if query and body.messages[-1].role == "user":
     append_message(session_id, "user", query)
 
-  initial_state: AgentState = {
+  initial_state = {
     "messages": [m.model_dump() for m in body.messages],
     "session_id": session_id,
     "query": query,
@@ -72,37 +79,54 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     "step_count": 0,
   }
 
-  if body.use_rag and query:
-    try:
-      retrieved = hybrid_search(query, top_k=5, api_key=effective_emb_key, base_url=effective_emb_base, model=effective_emb_model)
-      initial_state["retrieved_chunks"] = retrieved
-    except Exception:
-      initial_state["retrieved_chunks"] = []
+  t_req = time.perf_counter()
 
   async def generate():
-    yield "event: session\ndata: " + json.dumps({"session_id": session_id}) + "\n\n"
+    yield _sse("session", {"session_id": session_id})
+    yield _sse("stage", {"stage": "rag_search", "status": "started"})
+
+    t_rag_start = time.perf_counter()
+    retrieved = []
+    if body.use_rag and query:
+      try:
+        retrieved = hybrid_search(query, top_k=5, api_key=effective_emb_key, base_url=effective_emb_base, model=effective_emb_model)
+      except Exception as e:
+        _log.warning("hybrid_search failed: %s", e)
+        retrieved = []
+    initial_state["retrieved_chunks"] = retrieved
+    t_rag_ms = (time.perf_counter() - t_rag_start) * 1000
+    yield _sse("stage", {"stage": "rag_search", "status": "done", "ms": round(t_rag_ms, 1), "hits": len(retrieved)})
+    yield _sse("stage", {"stage": "llm_stream", "status": "started"})
+
     text_parts = []
     citations = []
     errored = False
+    first_delta_logged = False
     try:
       async for kind, payload in answer_node_stream(initial_state):
         if kind == "text_delta":
           text_parts.append(payload)
-          for line in payload.split("\n"):
-            yield "data: " + line + "\n"
-          yield "\n"
+          if not first_delta_logged:
+            first_delta_logged = True
+            t_first = (time.perf_counter() - t_req) * 1000
+            _log.info("chat ttft: rag=%.0fms llm_first_delta_from_req=%.0fms rag_hits=%d session=%s model=%s", t_rag_ms, t_first, len(retrieved), session_id, body.model or "")
+          for line in payload.split(chr(10)):
+            yield "data: " + line + chr(10)
+          yield chr(10)
         elif kind == "done":
           citations = payload.get("citations") or []
         elif kind == "error":
           errored = True
-          yield "event: error\ndata: " + json.dumps({"detail": payload}, ensure_ascii=False) + "\n\n"
+          yield _sse("error", {"detail": payload})
     except Exception as e:
       errored = True
-      yield "event: error\ndata: " + json.dumps({"detail": str(e)}, ensure_ascii=False) + "\n\n"
+      yield _sse("error", {"detail": str(e)})
+
+    yield _sse("stage", {"stage": "llm_stream", "status": "done"})
 
     if citations:
-      yield "event: citations\ndata: " + json.dumps(citations, ensure_ascii=False) + "\n\n"
-    yield "data: [DONE]\n\n"
+      yield _sse("citations", citations)
+    yield "data: [DONE]" + chr(10) + chr(10)
 
     if not errored and text_parts:
       full_text = "".join(text_parts)
@@ -111,8 +135,4 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       except Exception:
         pass
 
-  return StreamingResponse(
-    generate(),
-    media_type="text/event-stream",
-    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-  )
+  return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

@@ -16,6 +16,7 @@ const formName = ref('')
 const formBaseUrl = ref('')
 const formApiKey = ref('')
 const detecting = ref(false)
+const saving = ref(false)
 const detected = ref<{ provider: string; models: string[] } | null>(null)
 onMounted(() => {
   settings.init()
@@ -39,29 +40,37 @@ async function doDetect() {
   }
 }
 
-function saveEntry() {
+async function saveEntry() {
   if (!detected.value) {
     message.warning('请先识别模型')
     return
   }
-  const entry: CustomModelEntry = {
-    id: 'm_' + Date.now(),
-    name: formName.value.trim() || '未命名',
-    baseUrl: formBaseUrl.value.trim(),
-    apiKey: formApiKey.value.trim(),
-    provider: detected.value.provider,
-    models: detected.value.models.map(m => ({ name: m, reasoning: 'medium' as ReasoningLevel })),
-    defaultModel: detected.value.models[0] || '',
-    createdAt: new Date().toISOString(),
+  saving.value = true
+  try {
+    const ok = await models.add({
+      name: formName.value.trim() || '未命名',
+      baseUrl: formBaseUrl.value.trim(),
+      apiKey: formApiKey.value.trim(),
+      provider: detected.value.provider,
+      models: detected.value.models.map(m => ({ name: m, reasoning: 'medium' as ReasoningLevel })),
+      defaultModel: detected.value.models[0] || '',
+    })
+    if (!ok) {
+      message.error('后端保存失败: ' + (models.lastError || 'unknown'))
+      return
+    }
+    message.success('已写入后端 ' + (models.filePath || 'models.json'))
+    formName.value = ''
+    formBaseUrl.value = ''
+    formApiKey.value = ''
+    detected.value = null
+  } finally {
+    saving.value = false
   }
-  models.add(entry)
-  message.info('已添加，可在聊天页选择')
-  formApiKey.value = ''
-  detected.value = null
 }
-function removeEntry(id: string) {
-  models.remove(id)
-  message.info('已删除')
+async function removeEntry(id: string) {
+  const ok = await models.remove(id)
+  message[ok ? 'info' : 'error'](ok ? '已删除' : '删除失败: ' + (models.lastError || 'unknown'))
 }
 </script>
 

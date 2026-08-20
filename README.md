@@ -1,4 +1,4 @@
-# HD — Personal Knowledge Base Agent
+# HD 鈥?Personal Knowledge Base Agent
 
 HD is a local-first personal knowledge base that pairs a multi-format inbox with hybrid (vector + keyword) retrieval, multi-LLM chat, and a Vue 3 frontend.
 
@@ -23,10 +23,10 @@ copy .env.example .env       # then fill LLM_API_KEY / EMBEDDING_API_KEY
 # 2. Frontend (new shell)
 cd frontend
 npm install
-npm run dev                  # http://127.0.0.1:5173
+npm run dev                  # http://127.0.0.1:5174
 ```
 
-Open `http://127.0.0.1:5173`. In **Settings -> Add custom model**, paste your OpenAI-compatible `Base URL` + `API Key` + detected model names, then visit **Knowledge Base** to upload PDFs, images (OCR), Office files, or text.
+Open `http://127.0.0.1:5174`. In **Settings -> Add custom model**, paste your OpenAI-compatible `Base URL` + `API Key` + detected model names, then visit **Knowledge Base** to upload PDFs, images (OCR), Office files, or text.
 
 ## Knowledge Base features
 - Multi-format ingest: PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT/MD, images (OCR via Tesseract)

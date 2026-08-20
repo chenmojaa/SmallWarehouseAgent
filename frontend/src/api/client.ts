@@ -50,11 +50,12 @@ export async function deleteReq(path: string): Promise<unknown> {
   return res.json()
 }
 
-export async function* streamSse(path: string, body: unknown): AsyncGenerator<{ event: string; data: string }> {
+export async function* streamSse(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<{ event: string; data: string }> {
   const res = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
+    signal,
   })
   if (!res.ok || !res.body) throw new Error("HTTP " + res.status)
 

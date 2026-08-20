@@ -7,7 +7,7 @@
     "strict": true,
     "skipLibCheck": true,
     "composite": true,
-    "noEmit": true,
+    "noEmit": false,
     "types": ["node"]
   },
   "include": ["vite.config.ts"]

@@ -1,49 +1,51 @@
 import { defineStore } from 'pinia'
+import {
+  listCustomModels,
+  createCustomModel,
+  updateCustomModel,
+  deleteCustomModel,
+  setSelectedModel,
+  type CustomModelEntry,
+  type ReasoningLevel,
+  type CreatePayload,
+} from '@/api/custom-models'
 
-export type ReasoningLevel = 'low' | 'medium' | 'high' | 'xhigh'
+export type { ReasoningLevel, CustomModelEntry }
 
-export interface CustomModelEntry {
-  id: string
-  name: string
-  baseUrl: string
-  apiKey: string
-  provider: string
-  models: { name: string; reasoning: ReasoningLevel }[]
-  defaultModel: string
-  embeddingModel?: string   // optional: separate model for embeddings (MiniMax uses embo-01 etc.)
-  createdAt: string
-}
-
-const STORAGE_KEY = 'sb_custom_models'
-const SELECTED_KEY = 'sb_selected_model'
-
-function load(): CustomModelEntry[] {
-  try {
-    const s = localStorage.getItem(STORAGE_KEY)
-    return s ? JSON.parse(s) : []
-  } catch { return [] }
-}
-
-function save(list: CustomModelEntry[]) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)) } catch {}
-}
-
-function loadSelected(): string | null {
-  try { return localStorage.getItem(SELECTED_KEY) } catch { return null }
-}
+// Legacy localStorage keys (kept so we can migrate old data on first load).
+const LEGACY_LIST_KEY = 'sb_custom_models'
+const LEGACY_SELECTED_KEY = 'sb_selected_model'
 
 interface State {
   list: CustomModelEntry[]
   selectedId: string | null
+  loading: boolean
+  loaded: boolean
+  lastError: string | null
+  filePath: string | null
+}
+
+function parseLegacy(raw: string | null): CustomModelEntry[] {
+  if (!raw) return []
+  try {
+    const j = JSON.parse(raw)
+    if (Array.isArray(j)) return j as CustomModelEntry[]
+    if (j && Array.isArray(j.items)) return j.items as CustomModelEntry[]
+  } catch {
+    return []
+  }
+  return []
 }
 
 export const useModelsStore = defineStore('models', {
-  state: (): State => {
-    const list = load()
-    let selectedId = loadSelected()
-    if (!selectedId && list.length > 0) selectedId = list[0].id
-    return { list, selectedId }
-  },
+  state: (): State => ({
+    list: [],
+    selectedId: null,
+    loading: false,
+    loaded: false,
+    lastError: null,
+    filePath: null,
+  }),
   getters: {
     selected(state): (CustomModelEntry & { modelName: string; reasoning: ReasoningLevel }) | null {
       const e = state.list.find(x => x.id === state.selectedId) || state.list[0]
@@ -53,36 +55,150 @@ export const useModelsStore = defineStore('models', {
     },
   },
   actions: {
-    persist() { save(this.list) },
-    add(entry: CustomModelEntry) {
-      this.list.push(entry)
-      if (!this.selectedId) this.selectedId = entry.id
-      this.persist()
-    },
-    update(id: string, patch: Partial<CustomModelEntry>) {
-      const i = this.list.findIndex(x => x.id === id)
-      if (i >= 0) {
-        this.list[i] = { ...this.list[i], ...patch }
-        this.persist()
-      }
-    },
-    remove(id: string) {
-      this.list = this.list.filter(x => x.id !== id)
-      if (this.selectedId === id) {
-        this.selectedId = this.list[0]?.id ?? null
+    /** Pull the list from the backend. Safe to call multiple times. */
+    async loadFromBackend() {
+      if (this.loading) return
+      this.loading = true
+      this.lastError = null
+      try {
+        // If we have legacy localStorage entries AND the backend is empty,
+        // migrate them up so the user doesn't lose their old data.
+        const legacyList = parseLegacy(localStorage.getItem(LEGACY_LIST_KEY))
+        const legacySelected = localStorage.getItem(LEGACY_SELECTED_KEY)
+
+        const r = await listCustomModels()
+        this.filePath = r.path ?? null
+
+        if (r.items.length === 0 && legacyList.length > 0) {
+          // Push legacy entries to backend.
+          for (const e of legacyList) {
+            const payload: CreatePayload = {
+              name: e.name,
+              baseUrl: e.baseUrl,
+              apiKey: e.apiKey,
+              provider: e.provider,
+              models: e.models,
+              defaultModel: e.defaultModel,
+              embeddingModel: e.embeddingModel ?? null,
+            }
+            try { await createCustomModel(payload) }
+            catch (err) { console.warn('[models] legacy migration failed for', e.name, err) }
+          }
+          // Re-fetch to pick up the server-assigned ids.
+          const r2 = await listCustomModels()
+          this.list = r2.items
+          this.selectedId = r2.selected_id ?? this.list[0]?.id ?? null
+        } else {
+          this.list = r.items
+          this.selectedId = r.selected_id ?? this.list[0]?.id ?? null
+          // If we had a legacy selection that doesn't match any current id,
+          // also restore it (best effort).
+          if (legacySelected && !this.selectedId && this.list.some(x => x.id === legacySelected)) {
+            this.selectedId = legacySelected
+          }
+        }
+
+        // Drop the legacy cache once we have backend state.
         try {
-          if (this.selectedId) localStorage.setItem(SELECTED_KEY, this.selectedId)
-          else localStorage.removeItem(SELECTED_KEY)
+          localStorage.removeItem(LEGACY_LIST_KEY)
+          localStorage.removeItem(LEGACY_SELECTED_KEY)
         } catch {}
+
+        this.loaded = true
+      } catch (e) {
+        this.lastError = (e as Error).message || String(e)
+        console.error('[models] loadFromBackend failed:', this.lastError)
+      } finally {
+        this.loading = false
       }
-      this.persist()
     },
-    select(id: string | null) {
+
+    async add(entry: Omit<CustomModelEntry, 'id' | 'createdAt'>): Promise<boolean> {
+      this.lastError = null
+      // Optimistic insert
+      const placeholder: CustomModelEntry = {
+        ...(entry as CustomModelEntry),
+        id: 'pending-' + Date.now(),
+        createdAt: new Date().toISOString(),
+      }
+      this.list.push(placeholder)
+      if (!this.selectedId) this.selectedId = placeholder.id
+
+      try {
+        const saved = await createCustomModel(entry)
+        const i = this.list.findIndex(x => x.id === placeholder.id)
+        if (i >= 0) this.list[i] = saved
+        if (this.selectedId === placeholder.id) this.selectedId = saved.id
+        return true
+      } catch (e) {
+        // Rollback
+        this.list = this.list.filter(x => x.id !== placeholder.id)
+        if (this.selectedId === placeholder.id) {
+          this.selectedId = this.list[0]?.id ?? null
+        }
+        this.lastError = (e as Error).message || String(e)
+        return false
+      }
+    },
+
+    async update(id: string, patch: Partial<CustomModelEntry>): Promise<boolean> {
+      this.lastError = null
+      const i = this.list.findIndex(x => x.id === id)
+      const original = i >= 0 ? { ...this.list[i] } : null
+      if (i >= 0) this.list[i] = { ...this.list[i], ...patch }
+
+      try {
+        const saved = await updateCustomModel(id, patch)
+        if (i >= 0) this.list[i] = saved
+        return true
+      } catch (e) {
+        if (i >= 0 && original) this.list[i] = original
+        this.lastError = (e as Error).message || String(e)
+        return false
+      }
+    },
+
+    async remove(id: string): Promise<boolean> {
+      this.lastError = null
+      const originalList = [...this.list]
+      const wasSelected = this.selectedId === id
+      this.list = this.list.filter(x => x.id !== id)
+      if (wasSelected) {
+        this.selectedId = this.list[0]?.id ?? null
+      }
+
+      try {
+        await deleteCustomModel(id)
+        if (wasSelected) await setSelectedModel(this.selectedId)
+        return true
+      } catch (e) {
+        this.list = originalList
+        if (wasSelected) this.selectedId = id
+        this.lastError = (e as Error).message || String(e)
+        return false
+      }
+    },
+
+    async select(id: string | null): Promise<boolean> {
+      this.lastError = null
+      const original = this.selectedId
       this.selectedId = id
       try {
-        if (id) localStorage.setItem(SELECTED_KEY, id)
-        else localStorage.removeItem(SELECTED_KEY)
-      } catch {}
+        await setSelectedModel(id)
+        return true
+      } catch (e) {
+        this.selectedId = original
+        this.lastError = (e as Error).message || String(e)
+        return false
+      }
+    },
+
+    forceFlush(): Promise<boolean> {
+      // No-op for backend-backed store; reload picks up server state.
+      return this.loadFromBackend().then(() => true)
+    },
+    debugReadStorage(): string | null {
+      return this.filePath
     },
   },
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
@@ -7,7 +7,7 @@ import { useModelsStore } from '@/stores/models'
 import { NSpace, NInput, NButton, NText, NSwitch } from 'naive-ui'
 import MessageBubble from '@/components/MessageBubble.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
-import CitationCard from '@/components/CitationCard.vue'
+import CitationPreview from '@/components/CitationPreview.vue'
 
 const chat = useChatStore()
 const sessions = useSessionsStore()
@@ -17,6 +17,18 @@ const route = useRoute()
 
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
+const stageLabel = computed(() => {
+  const s = chat.stage
+  if (!s) return "正在思考..."
+  if (s.stage === "rag_search" && s.status === "started") return "检索知识库中..."
+  if (s.stage === "rag_search" && s.status === "done") {
+    return s.hits && s.hits > 0
+      ? `检索到 ${s.hits} 条（${Math.round(s.ms ?? 0)}ms）`
+      : "未找到相关内容"
+  }
+  if (s.stage === "llm_stream" && s.status === "started") return "生成回答中..."
+  return "正在思考..."
+})
 const elapsed = ref(0)
 let timerId: number | null = null
 let tickStart = 0
@@ -38,7 +50,7 @@ function stopTimer() {
   elapsed.value = 0
 }
 
-watch(() => chat.isStreaming, (streaming) => {
+watch(() => chat.streamingHere, (streaming) => {
   if (streaming) startTimer()
   else stopTimer()
 })
@@ -64,7 +76,7 @@ watch(() => route.params.id, loadByRoute)
 
 async function send() {
   const text = input.value.trim()
-  if (!text || chat.isStreaming) return
+  if (!text || chat.streamingHere) return
   input.value = ""
   await chat.send(text)
   await nextTick()
@@ -104,7 +116,7 @@ function onKey(e: KeyboardEvent) {
           </div>
           <div style="flex: 1; min-width: 0"></div>
           <ModelSelector />
-          <n-button class="send-btn" type="primary" :disabled="chat.isStreaming" @click="send" circle>
+          <n-button class="send-btn" type="primary" :disabled="chat.streamingHere" @click="send" circle>
             <template #icon>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="12" y1="19" x2="12" y2="5"/>
@@ -126,13 +138,24 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" class="msg-row">
-          <MessageBubble v-if="!(chat.isStreaming && m.role === 'assistant' && !m.content)" :role="m.role" :content="m.content" />
+          <MessageBubble
+            v-if="!(chat.streamingHere && m.role === 'assistant' && !m.content)"
+            :role="m.role"
+            :content="m.content"
+            :citations="m.citations"
+            :active-index="m.activeCitationIndex ?? null"
+            @update:active-index="(n: number) => chat.setActiveCitation(m.id, n <= 0 ? null : n)"
+          />
           <div v-else class="thinking-row">
-            <div class="thinking-bubble">正在思考...（{{ elapsed }}s）</div>
+            <div class="thinking-bubble">{{ stageLabel }}（{{ elapsed }}s）</div>
           </div>
-          <div v-if="m.role === 'assistant' && m.citations && m.citations.length > 0" class="citations-row">
-            <CitationCard :citations="m.citations" />
-          </div>
+          <CitationPreview
+            v-if="m.role === 'assistant' && m.citations && m.citations.length > 0 && m.activeCitationIndex != null && m.activeCitationIndex >= 1 && m.citations[m.activeCitationIndex - 1]"
+            class="citations-row"
+            :citation="m.citations[m.activeCitationIndex - 1]"
+            :index="m.activeCitationIndex"
+            @close="chat.setActiveCitation(m.id, null)"
+          />
         </div>
       </div>
     </div>
@@ -155,7 +178,7 @@ function onKey(e: KeyboardEvent) {
           </div>
           <div style="flex: 1; min-width: 0"></div>
           <ModelSelector />
-          <n-button class="send-btn" type="primary" :disabled="chat.isStreaming" @click="send" circle>
+          <n-button class="send-btn" type="primary" :disabled="chat.streamingHere" @click="send" circle>
             <template #icon>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="12" y1="19" x2="12" y2="5"/>
@@ -256,7 +279,23 @@ function onKey(e: KeyboardEvent) {
   background: transparent !important;
   padding: 4px 4px !important;
 }
-.chat-input :deep(.n-input__textarea-el) { padding: 0 !important; }
+.chat-input :deep(.n-input) {
+  padding: 0 !important;
+}
+.chat-input :deep(.n-input__textarea-el) {
+  padding: 4px 4px !important;
+  margin: 0 !important;
+  text-indent: 0 !important;
+  resize: none !important;
+}
+.chat-input :deep(.n-input__textarea-el::placeholder) {
+  text-indent: 0 !important;
+  padding-left: 0 !important;
+  transition: opacity 0.15s ease;
+}
+.input-bar:focus-within .chat-input :deep(.n-input__textarea-el::placeholder) {
+  opacity: 0;
+}
 .input-toolbar {
   display: flex;
   align-items: center;
