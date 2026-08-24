@@ -7,29 +7,14 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from app.llm.factory import _build_model
 from app.agent.state import AgentState
+from app.agent.prompts import get_answer_instructions
 
 
-ANSWER_INSTRUCTIONS = """You are a strict assistant. Answer the question using ONLY the reference material below.
-
-Rules:
-1. Use only the reference chunks; never fabricate facts.
-2. Cite sources by index [n] matching the reference index below.
-3. If the reference material is insufficient, say so explicitly.
-4. Keep the answer concise.
-
-Output format:
-- Use Markdown for structure (bold, lists, headings, code blocks, tables).
-- For flowcharts / sequence / class diagrams, use a fenced ```mermaid block.
-- For images, use Markdown image syntax ![alt](url).
-- Citations: collect every [n] you reference into ONE trailing line at the very end:
-    来源：[n][m]...
-  listing each unique reference exactly once. Do NOT embed [n] markers inside body sentences or list items.
-
-Reference material:
-<<CONTEXT>>
-
-Question: <<QUESTION>>
-"""
+# Phase 4.1: prompt now lives in app/agent/prompts/config.yaml with a built-in
+# default fallback in prompts/__init__.py. The variable keeps the same name
+# so the rest of this file and any downstream import see no change. Resolved
+# once at import; runtime retuning via YAML requires a process restart.
+ANSWER_INSTRUCTIONS = get_answer_instructions()
 
 
 # Captures a citation marker like [1], [ 12 ], or [3]. We tolerate whitespace and
