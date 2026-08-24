@@ -1,12 +1,18 @@
 """LangGraph state schema for the HEAR agent."""
 from __future__ import annotations
 
-from typing import TypedDict
+import operator
+from typing import Annotated, TypedDict
 
 
 class AgentState(TypedDict, total=False):
   # ---- conversation ----
-  messages: list
+  # Phase 3.1: Annotated[list, operator.add] makes LangGraph concatenate per-node
+  # message deltas instead of replacing the whole list. Without this annotation
+  # a node returning {"messages": [m]} would clobber history; with it the same
+  # node appends m to the existing list. Required for the checkpointer-driven
+  # cross-call accumulation planned for Phase 3.5.
+  messages: Annotated[list, operator.add]
   session_id: str
 
   # ---- current request ----

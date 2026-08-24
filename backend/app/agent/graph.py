@@ -10,6 +10,7 @@ default is graph-driven.
 from __future__ import annotations
 
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.state import AgentState
 from app.agent.nodes.answer import answer_node
@@ -41,7 +42,14 @@ def build_graph():
   g.add_edge("answer", END)
   g.add_edge("ingest", END)
   g.add_edge("report", END)
-  return g.compile()
+  # Phase 3.2: attach a MemorySaver so the graph can persist state per
+  # thread_id across calls. SQLite-backed AsyncSqliteSaver is the next step
+  # (see CONTEXT_UPGRADE.md Phase 3); MemorySaver is enough to prove the
+  # thread_id -> history recovery wiring works in this PR. The checkpointer
+  # is shared as a module-level singleton so all callers of `graph` below
+  # see the same one without rebuilding the compiled object.
+  checkpointer = MemorySaver()
+  return g.compile(checkpointer=checkpointer)
 
 
 graph = build_graph()

@@ -120,11 +120,25 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     if settings.use_graph:
       yield _sse("stage", {"stage": "router", "status": "started"})
       t_router = time.perf_counter()
+      # Phase 3.3: thread_id config makes the checkpointer in graph.py save
+      # final state per session, so a later call with the same session_id can
+      # resume from where this one left off. chat.py still seeds initial_state
+      # from DB (Phase 2); the checkpointer supplements it for LangGraph-level
+      # state continuity.
+      graph_config = {"configurable": {"thread_id": session_id}} if session_id else None
       try:
-        async for event in graph.astream(initial_state):
+        async for event in graph.astream(initial_state, config=graph_config):
           for node_name, delta in (event or {}).items():
             if not isinstance(delta, dict):
               continue
+            # Phase 3.1: state.messages uses Annotated[list, operator.add].
+            # When a node returns {"messages": [...]} LangGraph accumulates
+            # it under the hood, but the per-node delta in the stream event
+            # is the new fragment only -- merging with update() would clobber
+            # history. Extend in place for messages, update the rest.
+            if "messages" in delta:
+              msgs = delta.pop("messages") or []
+              final_state.setdefault("messages", []).extend(msgs)
             final_state.update(delta)
             if node_name == "router":
               intent = delta.get("intent") or intent
