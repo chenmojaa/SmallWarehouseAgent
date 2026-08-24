@@ -1,5 +1,7 @@
 import logging
 import os
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,11 +14,26 @@ from app.api.notes import router as notes_router
 from app.api.search import router as search_router
 from app.api.sessions import router as sessions_router
 from app.api.custom_models import router as custom_models_router
+from app.api.feishu import router as feishu_router
 
-logging.basicConfig(
-  level=settings.log_level.upper(),
-  format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+_root = logging.getLogger()
+_root.setLevel(settings.log_level.upper())
+_stream = logging.StreamHandler()
+_stream.setFormatter(_fmt)
+_root.addHandler(_stream)
+# Rotating file handler: 10MB x 5 backups (per OPTIMIZATION.md \u00a73)
+_file = RotatingFileHandler(
+  LOG_DIR / "hd.log",
+  maxBytes=10 * 1024 * 1024,
+  backupCount=5,
+  encoding="utf-8",
 )
+_file.setFormatter(_fmt)
+_root.addHandler(_file)
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = int(os.environ.get("HD_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
@@ -56,6 +73,7 @@ app.include_router(notes_router, prefix="/api")
 app.include_router(search_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 app.include_router(custom_models_router, prefix="/api")
+app.include_router(feishu_router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -81,4 +99,26 @@ async def _startup():
       logger.info("OCR:      tesseract NOT installed (image OCR disabled)")
   except Exception as e:
     logger.info(f"OCR check failed: {e}")
+
+  # ---- Feishu background sync ----
+  if settings.feishu_enabled and settings.feishu_sync_interval_min > 0:
+    import asyncio
+    from app.feishu_sync import sync_all
+    interval_s = max(60, settings.feishu_sync_interval_min * 60)
+    async def _feishu_loop():
+      logger.info(f"Feishu background sync enabled, interval={interval_s}s")
+      while True:
+        try:
+          results = await asyncio.to_thread(sync_all)
+          for r in results:
+            logger.info(
+              f"Feishu sync [{r.space_name}]: synced={r.synced} skipped={r.skipped} failed={r.failed}"
+            )
+        except Exception as e:
+          logger.warning(f"Feishu background sync failed: {type(e).__name__}: {e}")
+        await asyncio.sleep(interval_s)
+    asyncio.create_task(_feishu_loop())
+  elif settings.feishu_enabled:
+    logger.info("Feishu enabled but FEISHU_SYNC_INTERVAL_MIN=0 (manual sync only)")
+
   logger.info("=" * 50)

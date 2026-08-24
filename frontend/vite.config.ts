@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
     server: {
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 5174,
       strictPort: true,
       allowedHosts,

@@ -1,4 +1,4 @@
-﻿$env:VITE_ALLOWED_HOSTS = "11gv92qt74799.vicp.fun,10.0.0.110,localhost,127.0.0.1"
+$env:VITE_ALLOWED_HOSTS = "localhost,127.0.0.1"
 $env:VITE_API_TARGET = "http://127.0.0.1:8001"
 
 $stdout = "D:\one_agent\frontend\vite.out.log"
