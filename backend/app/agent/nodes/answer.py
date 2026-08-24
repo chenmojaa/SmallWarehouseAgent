@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from app.llm.factory import _build_model
 from app.agent.state import AgentState
@@ -58,7 +58,27 @@ def _build_messages(state: AgentState):
   chunks = state.get("retrieved_chunks") or []
   question = state.get("query", "") or "(no question)"
   instructions = ANSWER_INSTRUCTIONS.replace("<<CONTEXT>>", _format_context(chunks)).replace("<<QUESTION>>", question)
-  msgs = [SystemMessage(content=instructions), HumanMessage(content=question)]
+  msgs = [SystemMessage(content=instructions)]
+
+  # Phase 1.1: feed recent conversation history into the prompt. Without this,
+  # a follow-up like that-er-zi-ne gets answered in isolation because the LLM
+  # never sees the previous turn. Window of 8 (~4 turns) covers normal
+  # follow-ups without diluting attention or blowing up tokens.
+  history = [
+    m for m in (state.get("messages") or [])
+    if m.get("role") in ("user", "assistant") and m.get("content")
+  ]
+  # The most-recent user turn is the current question; drop it here so we can
+  # append it once at the end with consistent formatting.
+  if history and history[-1]["role"] == "user" and history[-1]["content"] == question:
+    history = history[:-1]
+  for m in history[-8:]:
+    if m["role"] == "user":
+      msgs.append(HumanMessage(m["content"]))
+    else:
+      msgs.append(AIMessage(m["content"]))
+
+  msgs.append(HumanMessage(content=question))
   return chat, msgs, chunks
 
 
