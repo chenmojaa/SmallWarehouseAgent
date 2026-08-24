@@ -206,7 +206,12 @@ export const useChatStore = defineStore("chat", {
       //   (C) Navigating AWAY from the streaming session -> save snapshot so
       //       we can restore when they come back.
       const inFlight =
-        this.streamingSessionId !== null && this.messages.length > 0
+        // Decoupled from messages.length on purpose: when the user navigates
+        // away mid-stream, ChatView routes through `clear()` which (after
+        // the fix below) keeps messages intact but zeros sessionId. Relying
+        // on messages.length here would incorrectly classify that as "not
+        // in flight" and we'd overwrite the live state with stale DB rows.
+        this.isStreaming && this.streamingSessionId !== null
 
       const sameSessionReopen =
         inFlight &&
@@ -259,7 +264,18 @@ export const useChatStore = defineStore("chat", {
       this.error = null
     },
     clear() {
-      // Same as loadFromSession: keep the background stream alive.
+      // If a background stream is still running, leaving (e.g. clicking
+      // "知识库" / Skill / 搜索对话) must NOT wipe messages or snapshot.
+      // `loadFromSession` is the only place that knows how to restore the
+      // snapshot; if we zero it here, the user's next click back into the
+      // session lands on stale DB rows and the in-flight assistant bubble
+      // (including the streaming "思考中..." placeholder) disappears.
+      if (this.isStreaming && this.streamingSessionId !== null && this.messages.length > 0) {
+        this.streamingSnapshot = [...this.messages]
+        this.sessionId = null
+        this.error = null
+        return
+      }
       this.sessionId = null
       this.messages = []
       this.streamingSnapshot = null

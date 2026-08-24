@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from sqlmodel import Field, SQLModel, create_engine, Session, select, text
@@ -236,15 +237,30 @@ def list_sessions(limit: int = 100) -> list[dict]:
       msg_count = s.exec(
         select(ChatMessage).where(ChatMessage.session_id == r.id)
       ).all()
+      # Some models (e.g. DeepSeek-class) sometimes leave <think>... unclosed
+      # in the streamed text, which then leaks into the sidebar preview. Strip
+      # the leading <think> block so the preview reads as the actual answer.
+      preview_text = _strip_think(last.content) if last else ""
       out.append({
         "id": r.id,
         "title": r.title,
         "created_at": r.created_at.isoformat(),
         "updated_at": r.updated_at.isoformat(),
         "message_count": len(msg_count),
-        "preview": (last.content[:60] + ("..." if last.content and len(last.content) > 60 else "")) if last else "",
+        "preview": (preview_text[:60] + ("..." if preview_text and len(preview_text) > 60 else "")),
       })
   return out
+
+
+_THINK_RE = re.compile(r"<think>[\s\S]*?(</think>|$)", re.IGNORECASE)
+def _strip_think(s: str) -> str:
+  """Drop a leading <think>...</think> block (paired OR unclosed trailing).
+
+  Mirrors the frontend's stripThink so the sidebar preview agrees with what
+  the user actually sees inside MessageBubble."""
+  if not s:
+    return ""
+  return _THINK_RE.sub("", s, count=1).strip()
 
 
 def get_session_with_messages(session_id: str) -> dict | None:
