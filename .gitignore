@@ -59,3 +59,6 @@ _*.html
 _*.json
 _*.png
 _*.log
+
+# Debug screenshots from manual UI testing
+test-*.png
