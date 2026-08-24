@@ -171,6 +171,13 @@ function onKey(e: KeyboardEvent) {
             :index="m.activeCitationIndex"
             @close="chat.setActiveCitation(m.id, null)"
           />
+          <IngestResultCard v-if="m.role === 'assistant' && m.ingest" :data="m.ingest" class="ingest-row" />
+          <div v-if="m.role === 'assistant' && m.report" class="report-row">
+            <div class="report-head">周报已生成</div>
+            <div v-if="m.report.message" class="report-msg">{{ m.report.message }}</div>
+            <div v-else-if="m.report.summary" class="report-summary">{{ m.report.summary }}</div>
+            <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -400,10 +407,3 @@ function onKey(e: KeyboardEvent) {
 }
 .hint-icon { font-size: 13px; }
 </style>
-          <IngestResultCard v-if="m.role === 'assistant' && m.ingest" :data="m.ingest" class="ingest-row" />
-          <div v-if="m.role === 'assistant' && m.report" class="report-row">
-            <div class="report-head">周报已生成</div>
-            <div v-if="m.report.message" class="report-msg">{{ m.report.message }}</div>
-            <div v-else-if="m.report.summary" class="report-summary">{{ m.report.summary }}</div>
-            <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
-          </div>
