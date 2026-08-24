@@ -8,6 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.llm.factory import _build_model
 from app.agent.state import AgentState
 from app.agent.prompts import get_answer_instructions
+from app.agent.context import format_context as _format_context
 
 
 # Phase 4.1: prompt now lives in app/agent/prompts/config.yaml with a built-in
@@ -20,16 +21,6 @@ ANSWER_INSTRUCTIONS = get_answer_instructions()
 # Captures a citation marker like [1], [ 12 ], or [3]. We tolerate whitespace and
 # trailing punctuation; out-of-range indices are dropped downstream.
 _CITE_RE = re.compile(r"\[\s*(\d+)\s*\]")
-
-
-def _format_context(chunks):
-  if not chunks:
-    return "(no reference material available)"
-  out = []
-  for i, c in enumerate(chunks, 1):
-    title = c.get("title") or c.get("note_id", "?")
-    out.append("[%d] source: %s\n%s" % (i, title, c.get("text", "")))
-  return "\n\n---\n\n".join(out)
 
 
 def _build_messages(state: AgentState):
