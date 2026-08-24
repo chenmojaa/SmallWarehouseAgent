@@ -22,8 +22,8 @@ import sys
 
 import lark_oapi as lark
 
-APP_ID = os.environ.get("FEISHU_APP_ID", "cli_aa0d562ca9219bfb")
-APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "3LckQaiRnRLlDRQgYGLOChEGpgSGn3bx")
+APP_ID = os.environ.get("FEISHU_APP_ID", "YOUR_FEISHU_APP_ID")
+APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "YOUR_FEISHU_APP_SECRET")
 
 
 def _configure_logging() -> None:
