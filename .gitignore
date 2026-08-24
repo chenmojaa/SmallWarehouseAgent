@@ -16,6 +16,7 @@ env/
 *.err
 *.out
 uvicorn*.log
+logs/
 
 # Backend runtime data
 backend/data/
