@@ -21,7 +21,12 @@ uvicorn*.log
 backend/data/
 backend/.env
 .env
-.env.*
+# Keep .env.example tracked (it's a template); ignore real env files only.
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
 
 # Frontend
 frontend/node_modules/
