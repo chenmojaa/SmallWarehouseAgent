@@ -74,9 +74,13 @@ export const useChatStore = defineStore("chat", {
 
       const models = useModelsStore()
       const sessions = useSessionsStore()
-      const history: ChatMessage[] = this.messages
-        .filter(m => m.id !== asstMsg.id)
-        .map(m => ({ role: m.role, content: m.content }))
+      // Phase 3.5: stop shipping the entire conversation history in every
+      // request. The backend now reads history from the DB (Phase 2) so the
+      // only payload it actually needs is the current turn. This shrinks the
+      // request body to O(1) regardless of session length and removes a
+      // class of frontend tampering concerns. Legacy field kept as `messages`
+      // for backend type compatibility, but only the one entry is sent.
+      const history: ChatMessage[] = [{ role: 'user', content: text }]
 
       const sel = models.selected
       const provider = sel?.provider
