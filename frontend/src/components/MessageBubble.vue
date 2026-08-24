@@ -44,8 +44,14 @@ async function syncThinkOpenState(): Promise<void> {
   }
   if (!el || !t) return
   const key = THINK_KEY_PREFIX + hashContent(t)
-  const wantOpen = localStorage.getItem(key) === '1'
-  if (el.open !== wantOpen) el.open = wantOpen
+  // Only override the element's open state when we have an explicit saved
+  // choice. A missing key means "user hasn't decided yet", so we leave the
+  // element's default in place (the <details> ships with the `open` attr so
+  // the thinking content is visible on first render).
+  const saved = localStorage.getItem(key)
+  if (saved !== null && el.open !== (saved === '1')) {
+    el.open = saved === '1'
+  }
   thinkToggleHandler = () => {
     localStorage.setItem(key, el.open ? '1' : '0')
   }
@@ -198,7 +204,7 @@ onBeforeUnmount(() => {
 <template>
   <div :class="['bubble-row', role]">
     <div :class="['bubble', role]">
-      <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section">
+      <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section" open>
         <summary>思考过程</summary>
         <div class="think-body">{{ think }}</div>
       </details>
