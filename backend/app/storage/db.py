@@ -22,6 +22,8 @@ class Note(SQLModel, table=True):
   chunk_count: int = 0
   created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
   embedded: bool = False
+  source_revision: Optional[str] = None   # remote obj_edit_time / etag for incremental sync
+  source_updated_at: Optional[datetime] = None   # when we last saw a remote update
 
 
 class ChatSession(SQLModel, table=True):
@@ -56,10 +58,12 @@ def get_engine():
     )
     SQLModel.metadata.create_all(_engine)
     _init_fts(_engine)
+    _migrate_notes(_engine)
   return _engine
 
 
 def _init_fts(engine):
+  """Create the FTS5 virtual table if it doesn't exist yet."""
   with engine.begin() as conn:
     conn.execute(text("""
       CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
@@ -69,6 +73,27 @@ def _init_fts(engine):
         tokenize = "unicode61 remove_diacritics 2"
       )
     """))
+
+
+def _migrate_notes(engine):
+  """Idempotent column adds for existing Note tables.
+
+  SQLModel.metadata.create_all only creates missing tables, not missing columns.
+  Swallow 'duplicate column' / 'already exists' errors so this is safe to call
+  on every startup. Re-raise on any other failure.
+  """
+  statements = [
+    "ALTER TABLE notes ADD COLUMN source_revision TEXT",
+    "ALTER TABLE notes ADD COLUMN source_updated_at DATETIME",
+  ]
+  with engine.begin() as conn:
+    for stmt in statements:
+      try:
+        conn.execute(text(stmt))
+      except Exception as e:
+        msg = str(e).lower()
+        if "duplicate column" not in msg and "already exists" not in msg:
+          raise
 
 
 def get_session() -> Session:
@@ -179,6 +204,21 @@ def get_note_title(note_id: str) -> str | None:
   with get_session() as s:
     n = s.get(Note, note_id)
     return n.title if n else None
+
+
+def update_note_revision(note_id: str, revision: str | None,
+                         updated_at: datetime | None = None) -> bool:
+  """Update a note's source_revision + source_updated_at. Returns True on hit."""
+  with get_session() as s:
+    n = s.get(Note, note_id)
+    if not n:
+      return False
+    n.source_revision = revision
+    n.source_updated_at = updated_at or datetime.now(timezone.utc)
+    s.add(n)
+    s.commit()
+    s.refresh(n)
+    return True
 
 
 # === Chat Session helpers ===
