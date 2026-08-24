@@ -288,6 +288,27 @@ def get_session_with_messages(session_id: str) -> dict | None:
     ],
   }
 
+def get_messages(session_id: str, limit: int = 16) -> list[dict]:
+  """Return the last ``limit`` messages for a session as {role, content}.
+
+  Phase 2 server-side context source of truth (see CONTEXT_UPGRADE.md
+  Phase 2.1). Ordered oldest -> newest so callers can feed the result
+  straight into a LangChain message list. Excludes the 'system' role
+  because the answer node injects its own system prompt.
+  """
+  with get_session() as s:
+    rows = s.exec(
+      select(ChatMessage)
+      .where(ChatMessage.session_id == session_id)
+      .order_by(ChatMessage.id.desc())
+      .limit(limit)
+    ).all()
+  return [
+    {"role": m.role, "content": m.content}
+    for m in reversed(rows)
+    if m.role in ("user", "assistant")
+  ]
+
 
 def create_session(title: str = "新对话") -> ChatSession:
   from uuid import uuid4

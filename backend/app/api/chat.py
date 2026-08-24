@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.storage.hybrid import hybrid_search
-from app.storage.db import create_session, append_message
+from app.storage.db import create_session, append_message, get_messages
 from app.agent.graph import graph
 from app.agent.nodes.answer import answer_node_stream
 
@@ -58,8 +58,19 @@ def _sse(event: str, payload) -> str:
 
 def _build_initial_state(body: ChatRequest, query: str, session_id: str,
                          api_key, base_url, emb_key, emb_base, emb_model) -> dict:
+  # Phase 2: server is the source of truth for conversation history.
+  # We overwrite whatever the client sent with the messages we just persisted
+  # to DB. Frontend may still send `messages` for legacy reasons (Phase 3
+  # drops it), but we ignore it here.
+  # chat.py persists the user turn to DB *before* this call, so the trailing
+  # entry from get_messages is usually the current question. Append only when
+  # the last message is not already the current query (defensive: covers the
+  # rare case where the last inbound message was not a user role).
+  history = get_messages(session_id, limit=16) if session_id else []
+  if not history or history[-1] != {"role": "user", "content": query}:
+    history.append({"role": "user", "content": query})
   return {
-    "messages": [m.model_dump() for m in body.messages],
+    "messages": history,
     "session_id": session_id,
     "query": query,
     "retrieved_chunks": [],
