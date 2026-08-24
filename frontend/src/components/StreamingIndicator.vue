@@ -164,6 +164,7 @@ function switchTo() {
 .slide-up-enter-active,
 .slide-up-leave-active {
   transition: opacity 0.22s ease, transform 0.22s ease;
+}
 .slide-up-enter-from,
 .slide-up-leave-to {
   opacity: 0;
