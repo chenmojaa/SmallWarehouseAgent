@@ -329,8 +329,6 @@ api/chat.py:  use_rag=True?
 one_agent/
 |-- docs/
 |   |-- PLAN.md                # 项目计划书（P0-P9）
-|   |-- PROGRESS.md            # 阶段进度跟踪
-|   |-- STATUS.md              # 当前状态
 |   |-- RAG.md                 # RAG 三层链路详解
 |   |-- SKILLS.md              # Skill 中心（v0.4）
 |   |-- FEATURES.md            # ★ 本文档：功能现状总览
@@ -491,8 +489,6 @@ curl -X POST http://127.0.0.1:8001/api/feishu/sync
 ## 10. 相关文档索引
 
 - `docs/PLAN.md` — 项目原始计划书（P0-P9 路线图 + 技术选型）
-- `docs/PROGRESS.md` — 阶段进度跟踪（v0.4 ~ v0.5 历史）
-- `docs/STATUS.md` — 当前状态速查（含 v0.7 ~ v0.9 RAG 修复记录）
 - `docs/RAG.md` — RAG 三层链路详解（含 CJK 查询修复记录）
 - `docs/SKILLS.md` — Skill 中心（前端推荐 / 我的 Skill）
 - `docs/file-writing-policy.md` — UTF-8 无 BOM 写入规范（踩坑记录）
