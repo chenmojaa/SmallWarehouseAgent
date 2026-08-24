@@ -19,6 +19,10 @@ const route = useRoute()
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
 const stageLabel = computed(() => {
+  // While the model is mid-reasoning (inside a <think> block), prefer the
+  // "思考中..." label so the user knows the model is working, not stalled.
+  // Falls through to the pipeline-stage label once reasoning completes.
+  if (chat.thinking) return "思考中..."
   const s = chat.stage
   if (!s) return "正在思考..."
   if (s.stage === "rag_search" && s.status === "started") return "检索知识库中..."
@@ -154,7 +158,7 @@ function onKey(e: KeyboardEvent) {
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" class="msg-row">
           <MessageBubble
-            v-if="!(chat.streamingHere && m.role === 'assistant' && !m.content)"
+            v-if="!(chat.streamingHere && m.role === 'assistant' && (!m.content || chat.thinking))"
             :role="m.role"
             :content="m.content"
             :citations="m.citations"

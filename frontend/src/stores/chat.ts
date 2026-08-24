@@ -35,6 +35,11 @@ interface State {
   // session. Restored when they come back so the partial answer + the
   // thinking row don't disappear the moment they click another row.
   streamingSnapshot: Msg[] | null
+  // True while the LLM is inside a <think>...</think> block during streaming.
+  // ChatView uses this to swap the placeholder label to "思考中..." so the
+  // user gets a hint that the model is reasoning (not stalling) before the
+  // first body token arrives.
+  thinking: boolean
 }
 
 export const useChatStore = defineStore("chat", {
@@ -48,6 +53,7 @@ export const useChatStore = defineStore("chat", {
     streamingSessionId: null,
     stage: null,
     streamingSnapshot: null,
+    thinking: false,
   }),
   getters: {
     streamingHere: (s): boolean => s.isStreaming && s.streamingSessionId !== null && s.streamingSessionId === s.sessionId,
@@ -98,6 +104,7 @@ export const useChatStore = defineStore("chat", {
             } else {
               visible += s.slice(0, open)
               s = s.slice(open + 7)
+              if (!inThink) this.thinking = true
               inThink = true
             }
           } else {
@@ -108,6 +115,7 @@ export const useChatStore = defineStore("chat", {
               return
             }
             s = s.slice(close + 8)
+            if (inThink) this.thinking = false
             inThink = false
           }
         }
@@ -161,6 +169,9 @@ export const useChatStore = defineStore("chat", {
             this.error = msg
           } else if (ev.type === 'done') {
             if (inThink) {
+              // LLM ended without ever emitting a </think>; close it out so
+              // the placeholder doesn't keep flashing "思考中..." forever.
+              this.thinking = false
               visible = visible.replace(/<think>[\s\S]*$/, '')
               flushBubble()
             }
@@ -180,6 +191,7 @@ export const useChatStore = defineStore("chat", {
         this.streamingSessionId = null
         this.abortCtl = null
         this.stage = null
+        this.thinking = false
         this.streamingSnapshot = null
       }
     },
