@@ -34,6 +34,25 @@ class Settings(BaseSettings):
   chroma_dir: str = "./data/chroma"
   notes_dir: str = "./data/notes"
 
+
+  # ---- Feishu (Lark) sync ----
+  feishu_enabled: bool = False
+  feishu_app_id: str = ""
+  feishu_app_secret: str = ""
+  feishu_api_base: str = "https://open.feishu.cn"
+  feishu_space_ids: str = ""          # comma-separated list; empty = all visible spaces
+  feishu_sync_interval_min: int = 15   # minutes between sync runs
+  feishu_page_size: int = 50
+
+  # ---- Agent / Router (OPTIMIZATION.md \u00a72.5) ----
+  use_graph: bool = True                       # HD_USE_GRAPH; false = legacy direct-call path
+  router_enabled: bool = True                  # HD_ROUTER_ENABLED; false = always intent=chat
+  router_model: str = ""                       # empty = use main LLM model
+  router_base_url: str = ""                    # empty = use main base_url
+  research_max_iter: int = 3                   # HD_RESEARCH_MAX_ITER
+  research_target_chunks: int = 8              # HD_RESEARCH_TARGET_CHUNKS
+  ingest_provider: str = ""                    # empty = use main LLM for metadata extraction
+
   # ---- Ingestion ----
   chunk_size: int = 500
   chunk_overlap: int = 80

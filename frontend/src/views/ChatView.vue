@@ -8,6 +8,7 @@ import { NSpace, NInput, NButton, NText, NSwitch } from 'naive-ui'
 import MessageBubble from '@/components/MessageBubble.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import CitationPreview from '@/components/CitationPreview.vue'
+import IngestResultCard from '@/components/IngestResultCard.vue'
 
 const chat = useChatStore()
 const sessions = useSessionsStore()
@@ -21,12 +22,26 @@ const stageLabel = computed(() => {
   const s = chat.stage
   if (!s) return "正在思考..."
   if (s.stage === "rag_search" && s.status === "started") return "检索知识库中..."
+  if (s.stage === "router" && s.status === "started") return "识别意图中..."
+  if (s.stage === "router" && s.status === "done") {
+    return s.intent ? `路由 -> ${s.intent}` : "路由完成"
+  }
   if (s.stage === "rag_search" && s.status === "done") {
     return s.hits && s.hits > 0
       ? `检索到 ${s.hits} 条（${Math.round(s.ms ?? 0)}ms）`
       : "未找到相关内容"
   }
   if (s.stage === "llm_stream" && s.status === "started") return "生成回答中..."
+  if (s.stage === "agent" && s.status === "started") {
+    return s.agent === "research" ? "多轮检索中..."
+      : s.agent === "ingest"  ? "入库中..."
+      : s.agent === "report"  ? "生成周报中..." : "agent 运行中"
+  }
+  if (s.stage === "agent" && s.status === "done") {
+    if (s.agent === "research") return `研究完成 (${s.iterations || 0} 轮)`
+    if (s.agent === "ingest")  return "入库完成"
+    if (s.agent === "report")  return "周报已生成"
+  }
   return "正在思考..."
 })
 const elapsed = ref(0)
@@ -258,6 +273,30 @@ function onKey(e: KeyboardEvent) {
   line-height: 1.6;
 }
 .citations-row { margin-top: 6px; }
+.ingest-row { margin-top: 6px; }
+.report-row {
+  margin-top: 6px;
+  padding: 10px 14px;
+  background: var(--bg-bubble-assistant);
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  border-left: 3px solid #10b981;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 560px;
+}
+.report-head { font-weight: 600; margin-bottom: 4px; }
+.report-msg,
+.report-summary {
+  color: var(--text-secondary, #aaa);
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.report-meta {
+  margin-top: 4px;
+  color: var(--text-tertiary, #888);
+  font-size: 12px;
+  font-family: monospace;
+}
 
 /* ====== 输入栏：大圆角 + 柔和阴影 + 内部组件无边框 ====== */
 .input-bar {
@@ -361,3 +400,10 @@ function onKey(e: KeyboardEvent) {
 }
 .hint-icon { font-size: 13px; }
 </style>
+          <IngestResultCard v-if="m.role === 'assistant' && m.ingest" :data="m.ingest" class="ingest-row" />
+          <div v-if="m.role === 'assistant' && m.report" class="report-row">
+            <div class="report-head">周报已生成</div>
+            <div v-if="m.report.message" class="report-msg">{{ m.report.message }}</div>
+            <div v-else-if="m.report.summary" class="report-summary">{{ m.report.summary }}</div>
+            <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
+          </div>

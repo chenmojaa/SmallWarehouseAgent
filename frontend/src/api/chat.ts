@@ -27,16 +27,43 @@ export interface ChatRequest {
 }
 
 export interface StageEvent {
-  stage: "rag_search" | "llm_stream"
+  stage: "router" | "rag_search" | "llm_stream" | "agent"
   status: "started" | "done"
   ms?: number
   hits?: number
+  intent?: string
+  rewritten_query?: string
+  agent?: string
+  iterations?: number
+}
+
+export interface IngestResult {
+  ok: boolean
+  note_id?: string
+  title?: string
+  tags?: string[]
+  summary?: string
+  source_type?: string
+  embedded?: boolean
+  chunk_count?: number
+  duplicate_of?: number | null
+  error?: string
+}
+
+export interface ReportResult {
+  ok: boolean
+  empty?: boolean
+  period_days?: number
+  note_id?: string
+  counts?: { notes: number; tags: number }
+  summary?: string
+  message?: string
 }
 
 export interface ChatStreamEvent {
-  type: "session" | "delta" | "citations" | "done" | "error" | "stage"
+  type: "session" | "delta" | "citations" | "done" | "error" | "stage" | "ingest" | "report"
   session_id?: string
-  data?: string | Citation[] | StageEvent
+  data?: string | Citation[] | StageEvent | IngestResult | ReportResult
 }
 
 // 移除 <think>...</think> 思考段落（配对的 + 未闭合的尾部）
@@ -77,6 +104,10 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
       catch {}
     } else if (ev.event === "error") {
       yield { type: "error", data: ev.data }
+    } else if (ev.event === "ingest") {
+      try { yield { type: "ingest", data: JSON.parse(ev.data) } } catch {}
+    } else if (ev.event === "report") {
+      try { yield { type: "report", data: JSON.parse(ev.data) } } catch {}
     } else {
       yield { type: "delta", data: ev.data }
     }

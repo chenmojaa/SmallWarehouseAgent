@@ -9,8 +9,7 @@ const sessions = useSessionsStore()
 const router = useRouter()
 
 // Only when a stream is running AND the user is NOT looking at the session
-// that's producing. (When the user IS on the streaming session, ChatView's own
-// inline thinking row already shows the same info.)
+// that's producing.
 const visible = computed<boolean>(() => {
   return (
     chat.isStreaming &&
@@ -26,13 +25,30 @@ const targetSession = computed(() => {
 
 const label = computed<string>(() => {
   const s = chat.stage
-  if (!s) return '思考中...'
-  if (s.stage === 'rag_search' && s.status === 'started') return '检索知识库中...'
-  if (s.stage === 'rag_search' && s.status === 'done') {
-    return s.hits && s.hits > 0 ? '生成回答中...' : '生成回答中...'
+  if (!s) return '\u601d\u8003\u4e2d...'
+  if (s.stage === 'router' && s.status === 'started') return '\u8bc6\u522b\u610f\u56fe\u4e2d...'
+  if (s.stage === 'router' && s.status === 'done') {
+    return s.intent ? '\u8def\u7531 -> ' + s.intent : '\u8def\u7531\u5b8c\u6210'
   }
-  if (s.stage === 'llm_stream' && s.status === 'started') return '生成回答中...'
-  return '思考中...'
+  if (s.stage === 'rag_search' && s.status === 'started') return '\u68c0\u7d22\u77e5\u8bc6\u5e93\u4e2d...'
+  if (s.stage === 'rag_search' && s.status === 'done') {
+    return s.hits && s.hits > 0
+      ? '\u68c0\u7d22\u5230 ' + s.hits + ' \u6761'
+      : '\u68c0\u7d22\u5b8c\u6210\uff08\u65e0\u5339\u914d\uff09'
+  }
+  if (s.stage === 'agent' && s.status === 'started') {
+    return s.agent === 'research' ? '\u591a\u8f6e\u68c0\u7d22\u4e2d...' :
+           s.agent === 'ingest'  ? '\u5165\u5e93\u4e2d...' :
+           s.agent === 'report'  ? '\u751f\u6210\u5468\u62a5\u4e2d...' : 'agent \u8fd0\u884c\u4e2d'
+  }
+  if (s.stage === 'agent' && s.status === 'done') {
+    if (s.agent === 'research') return '\u7814\u7a76\u5b8c\u6210 (' + (s.iterations || 0) + ' \u8f6e)'
+    if (s.agent === 'ingest')  return '\u5165\u5e93\u5b8c\u6210'
+    if (s.agent === 'report')  return '\u5468\u62a5\u751f\u6210\u5b8c\u6210'
+    return 'agent \u5b8c\u6210'
+  }
+  if (s.stage === 'llm_stream' && s.status === 'started') return '\u751f\u6210\u56de\u7b54\u4e2d...'
+  return '\u601d\u8003\u4e2d...'
 })
 
 const elapsed = ref(0)
@@ -69,8 +85,8 @@ function switchTo() {
         <span class="dot"></span>
       </div>
       <div class="indicator-content">
-        <div class="indicator-title">{{ targetSession?.title || '未命名会话' }}</div>
-        <div class="indicator-status">{{ label }}（{{ elapsed }}s）· 点击切回去</div>
+        <div class="indicator-title">{{ targetSession?.title || '\u672a\u547d\u540d\u4f1a\u8bdd' }}</div>
+        <div class="indicator-status">{{ label }}\uff08{{ elapsed }}s\uff09\u00b7\u70b9\u51fb\u5207\u56de\u53bb</div>
       </div>
     </div>
   </Transition>
@@ -148,7 +164,6 @@ function switchTo() {
 .slide-up-enter-active,
 .slide-up-leave-active {
   transition: opacity 0.22s ease, transform 0.22s ease;
-}
 .slide-up-enter-from,
 .slide-up-leave-to {
   opacity: 0;

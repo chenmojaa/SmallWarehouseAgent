@@ -1,15 +1,26 @@
-"""Chat API with per-request overrides and LangGraph streaming."""
+"""Chat API: graph-driven orchestration with HD_USE_GRAPH fallback.
+
+When HD_USE_GRAPH=true (default), LangGraph handles router + sub-agent dispatch,
+and chat.py consumes the node events as SSE `stage` / domain events. After the
+graph terminates, chat.py drives the LLM token stream via answer_node_stream.
+
+When HD_USE_GRAPH=false, the legacy direct-call path is preserved (hybrid_search
++ answer_node_stream) for emergency rollback.
+"""
+from __future__ import annotations
+
 import json
 import logging
 import time
+
 from fastapi import APIRouter, HTTPException, Header
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from app.config import settings
 from app.storage.hybrid import hybrid_search
 from app.storage.db import create_session, append_message
-from app.agent.state import AgentState
-from app.agent.nodes.retrieve import retrieve_node
+from app.agent.graph import graph
 from app.agent.nodes.answer import answer_node_stream
 
 router = APIRouter(tags=["chat"])
@@ -34,7 +45,7 @@ class ChatRequest(BaseModel):
   embedding_base_url: str | None = None
 
 
-def _extract_query(messages: list[Message]) -> str:
+def _extract_query(messages):
   for m in reversed(messages):
     if m.role == "user" and m.content.strip():
       return m.content
@@ -45,17 +56,34 @@ def _sse(event: str, payload) -> str:
   return "event: " + event + chr(10) + "data: " + json.dumps(payload, ensure_ascii=False) + chr(10) + chr(10)
 
 
+def _build_initial_state(body: ChatRequest, query: str, session_id: str,
+                         api_key, base_url, emb_key, emb_base, emb_model) -> dict:
+  return {
+    "messages": [m.model_dump() for m in body.messages],
+    "session_id": session_id,
+    "query": query,
+    "retrieved_chunks": [],
+    "provider_override": body.provider,
+    "model_override": body.model,
+    "base_url_override": base_url,
+    "api_key_override": api_key,
+    "reasoning_level_override": body.reasoning_level,
+    "embedding_model_override": emb_model,
+    "step_count": 0,
+  }
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-API-Key")):
   if not body.messages:
     raise HTTPException(status_code=400, detail="messages is empty")
 
   query = _extract_query(body.messages)
-  effective_api_key = (body.api_key or x_api_key or "").strip() or None
-  effective_base_url = (body.base_url or "").strip() or None
-  effective_emb_key = (body.api_key or x_api_key or "").strip() or None
-  effective_emb_base = (body.embedding_base_url or body.base_url or "").strip() or None
-  effective_emb_model = (body.embedding_model or "").strip() or None
+  api_key = (body.api_key or x_api_key or "").strip() or None
+  base_url = (body.base_url or "").strip() or None
+  emb_key = (body.api_key or x_api_key or "").strip() or None
+  emb_base = (body.embedding_base_url or body.base_url or "").strip() or None
+  emb_model = (body.embedding_model or "").strip() or None
 
   session_id = body.session_id
   if not session_id:
@@ -66,38 +94,120 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
   if query and body.messages[-1].role == "user":
     append_message(session_id, "user", query)
 
-  initial_state = {
-    "messages": [m.model_dump() for m in body.messages],
-    "session_id": session_id,
-    "query": query,
-    "retrieved_chunks": [],
-    "provider_override": body.provider,
-    "model_override": body.model,
-    "base_url_override": effective_base_url,
-    "api_key_override": effective_api_key,
-    "reasoning_level_override": body.reasoning_level,
-    "step_count": 0,
-  }
-
+  initial_state = _build_initial_state(body, query, session_id, api_key, base_url,
+                                       emb_key, emb_base, emb_model)
   t_req = time.perf_counter()
 
   async def generate():
     yield _sse("session", {"session_id": session_id})
-    yield _sse("stage", {"stage": "rag_search", "status": "started"})
 
-    t_rag_start = time.perf_counter()
+    final_state = dict(initial_state)
+    intent = "chat"
+    rag_hits = 0
+    early_done = False
+
+    if settings.use_graph:
+      yield _sse("stage", {"stage": "router", "status": "started"})
+      t_router = time.perf_counter()
+      try:
+        async for event in graph.astream(initial_state):
+          for node_name, delta in (event or {}).items():
+            if not isinstance(delta, dict):
+              continue
+            final_state.update(delta)
+            if node_name == "router":
+              intent = delta.get("intent") or intent
+              router_ms = (time.perf_counter() - t_router) * 1000
+              yield _sse("stage", {"stage": "router", "status": "done",
+                                   "intent": intent,
+                                   "rewritten_query": delta.get("rewritten_query"),
+                                   "ms": round(router_ms, 1)})
+            elif node_name == "retrieve":
+              rag_hits = len(delta.get("retrieved_chunks") or [])
+              yield _sse("stage", {"stage": "rag_search", "status": "started"})
+              yield _sse("stage", {"stage": "rag_search", "status": "done", "hits": rag_hits})
+            elif node_name == "research":
+              iters = int(delta.get("research_iterations") or 0)
+              rag_hits = len(delta.get("retrieved_chunks") or [])
+              yield _sse("stage", {"stage": "agent", "status": "started", "agent": "research"})
+              yield _sse("stage", {"stage": "agent", "status": "done",
+                                   "agent": "research", "iterations": iters, "hits": rag_hits})
+            elif node_name == "ingest":
+              yield _sse("stage", {"stage": "agent", "status": "done", "agent": "ingest"})
+              yield _sse("ingest", delta.get("ingest_result") or {})
+              early_done = True
+            elif node_name == "report":
+              yield _sse("stage", {"stage": "agent", "status": "done", "agent": "report"})
+              yield _sse("report", delta.get("report_result") or {})
+              early_done = True
+      except Exception as e:
+        _log.warning("graph.astream failed: %s", e)
+        yield _sse("error", {"detail": "graph: %s: %s" % (type(e).__name__, e)})
+        # fall through to a minimal legacy answer
+        early_done = False
+        intent = "chat"
+
+      if early_done:
+        yield "data: [DONE]" + chr(10) + chr(10)
+        return
+
+      # Phase 2: LLM token stream from final graph state (chat / research).
+      yield _sse("stage", {"stage": "llm_stream", "status": "started"})
+      text_parts: list[str] = []
+      citations: list = []
+      errored = False
+      first_delta_logged = False
+      try:
+        async for kind, payload in answer_node_stream(final_state):
+          if kind == "text_delta":
+            text_parts.append(payload)
+            if not first_delta_logged:
+              first_delta_logged = True
+              t_first = (time.perf_counter() - t_req) * 1000
+              _log.info("chat ttft: graph=%s rag_hits=%d session=%s model=%s",
+                        intent, rag_hits, session_id, body.model or "")
+              _log.info("chat ttft_ms=%.0f", t_first)
+            for line in payload.split(chr(10)):
+              yield "data: " + line + chr(10)
+            yield chr(10)
+          elif kind == "done":
+            citations = payload.get("citations") or []
+          elif kind == "error":
+            errored = True
+            yield _sse("error", {"detail": payload})
+      except Exception as e:
+        errored = True
+        yield _sse("error", {"detail": str(e)})
+
+      yield _sse("stage", {"stage": "llm_stream", "status": "done"})
+      if citations:
+        yield _sse("citations", citations)
+      yield "data: [DONE]" + chr(10) + chr(10)
+
+      if not errored and text_parts:
+        try:
+          append_message(session_id, "assistant", "".join(text_parts),
+                         citations if citations else None)
+        except Exception:
+          pass
+      return
+
+    # ---- Legacy path (HD_USE_GRAPH=false) ----
+    yield _sse("stage", {"stage": "rag_search", "status": "started"})
+    t_rag = time.perf_counter()
     retrieved = []
     if body.use_rag and query:
       try:
-        retrieved = hybrid_search(query, top_k=5, api_key=effective_emb_key, base_url=effective_emb_base, model=effective_emb_model)
+        retrieved = hybrid_search(query, top_k=5, api_key=emb_key,
+                                  base_url=emb_base, model=emb_model)
       except Exception as e:
         _log.warning("hybrid_search failed: %s", e)
-        retrieved = []
     initial_state["retrieved_chunks"] = retrieved
-    t_rag_ms = (time.perf_counter() - t_rag_start) * 1000
-    yield _sse("stage", {"stage": "rag_search", "status": "done", "ms": round(t_rag_ms, 1), "hits": len(retrieved)})
-    yield _sse("stage", {"stage": "llm_stream", "status": "started"})
+    rag_ms = (time.perf_counter() - t_rag) * 1000
+    yield _sse("stage", {"stage": "rag_search", "status": "done",
+                        "ms": round(rag_ms, 1), "hits": len(retrieved)})
 
+    yield _sse("stage", {"stage": "llm_stream", "status": "started"})
     text_parts = []
     citations = []
     errored = False
@@ -109,7 +219,8 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
           if not first_delta_logged:
             first_delta_logged = True
             t_first = (time.perf_counter() - t_req) * 1000
-            _log.info("chat ttft: rag=%.0fms llm_first_delta_from_req=%.0fms rag_hits=%d session=%s model=%s", t_rag_ms, t_first, len(retrieved), session_id, body.model or "")
+            _log.info("chat ttft (legacy): rag=%.0fms llm_first_delta=%.0fms hits=%d session=%s",
+                      rag_ms, t_first, len(retrieved), session_id)
           for line in payload.split(chr(10)):
             yield "data: " + line + chr(10)
           yield chr(10)
@@ -123,16 +234,16 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       yield _sse("error", {"detail": str(e)})
 
     yield _sse("stage", {"stage": "llm_stream", "status": "done"})
-
     if citations:
       yield _sse("citations", citations)
     yield "data: [DONE]" + chr(10) + chr(10)
 
     if not errored and text_parts:
-      full_text = "".join(text_parts)
       try:
-        append_message(session_id, "assistant", full_text, citations if citations else None)
+        append_message(session_id, "assistant", "".join(text_parts),
+                       citations if citations else None)
       except Exception:
         pass
 
-  return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+  return StreamingResponse(generate(), media_type="text/event-stream",
+                          headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

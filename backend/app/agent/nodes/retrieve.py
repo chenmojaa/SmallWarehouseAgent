@@ -17,13 +17,18 @@ def _read_role(m) -> str:
 
 def retrieve_node(state: AgentState) -> dict:
   messages = state.get("messages") or []
-  query = ""
-  for m in reversed(messages):
-    if _read_role(m) == "user":
-      c = _read_content(m).strip()
-      if c:
-        query = c
-        break
+  # Prefer the router-rewritten query when present; fall back to the last user
+  # message verbatim (legacy behavior).
+  rewritten = (state.get("rewritten_query") or "").strip()
+  raw = (state.get("query") or "").strip()
+  query = rewritten or raw
+  if not query:
+    for m in reversed(messages):
+      if _read_role(m) == "user":
+        c = _read_content(m).strip()
+        if c:
+          query = c
+          break
 
   if not query:
     return {"retrieved_chunks": [], "step_count": state.get("step_count", 0) + 1}

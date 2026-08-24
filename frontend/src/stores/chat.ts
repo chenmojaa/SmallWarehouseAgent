@@ -4,12 +4,21 @@ import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
 
-interface Msg extends ChatMessage { id: string; citations?: Citation[]; activeCitationIndex?: number | null }
+interface Msg extends ChatMessage {
+  id: string
+  citations?: Citation[]
+  activeCitationIndex?: number | null
+  ingest?: IngestResult
+  report?: ReportResult
+}
 export interface PipelineStage {
-  stage: "rag_search" | "llm_stream"
+  stage: "router" | "rag_search" | "llm_stream" | "agent"
   status: "started" | "done"
   ms?: number
   hits?: number
+  intent?: string
+  agent?: string
+  iterations?: number
   at: number
 }
 
@@ -135,6 +144,14 @@ export const useChatStore = defineStore("chat", {
             this.stage = { ...(ev.data as PipelineStage), at: Date.now() }
           } else if (ev.type === 'citations' && Array.isArray(ev.data)) {
             asstMsg.citations = ev.data as Citation[]
+            const idx = this.messages.findIndex(m => m.id === asstMsg.id)
+            if (idx >= 0) this.messages[idx] = { ...asstMsg }
+          } else if (ev.type === 'ingest' && ev.data) {
+            asstMsg.ingest = ev.data as IngestResult
+            const idx = this.messages.findIndex(m => m.id === asstMsg.id)
+            if (idx >= 0) this.messages[idx] = { ...asstMsg }
+          } else if (ev.type === 'report' && ev.data) {
+            asstMsg.report = ev.data as ReportResult
             const idx = this.messages.findIndex(m => m.id === asstMsg.id)
             if (idx >= 0) this.messages[idx] = { ...asstMsg }
           } else if (ev.type === 'error') {
