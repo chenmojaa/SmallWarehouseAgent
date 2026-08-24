@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Marked, type Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import mermaid from 'mermaid'
@@ -17,6 +17,41 @@ const emit = defineEmits<{
 }>()
 
 const bubbleEl = ref<HTMLElement | null>(null)
+const detailsRef = ref<HTMLDetailsElement | null>(null)
+
+// Per-bubble thinking-process open/close state is stored in localStorage
+// keyed by a hash of the think content. This survives route navigation
+// (which unmounts <ChatView> and remounts every <MessageBubble>) so the
+// user's manual expand/collapse choice persists across pages.
+const THINK_KEY_PREFIX = 'hd:thinkOpen:'
+function hashContent(s: string): string {
+  let h = 5381 >>> 0
+  for (let i = 0; i < s.length; i++) {
+    h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h.toString(36)
+}
+
+let thinkToggleHandler: ((e: Event) => void) | null = null
+async function syncThinkOpenState(): Promise<void> {
+  const el = detailsRef.value
+  const t = think.value
+  // Detach any handler attached to a previous <details> element so we
+  // never leak listeners when Vue swaps the node on content update.
+  if (el && thinkToggleHandler) {
+    el.removeEventListener('toggle', thinkToggleHandler)
+    thinkToggleHandler = null
+  }
+  if (!el || !t) return
+  const key = THINK_KEY_PREFIX + hashContent(t)
+  const wantOpen = localStorage.getItem(key) === '1'
+  if (el.open !== wantOpen) el.open = wantOpen
+  thinkToggleHandler = () => {
+    localStorage.setItem(key, el.open ? '1' : '0')
+  }
+  el.addEventListener('toggle', thinkToggleHandler)
+}
+
 
 // 1) Pull the LEADING <think>...</think> block off and keep it as a separate
 //    piece, so the template can render it as a collapsible "thinking
@@ -48,6 +83,17 @@ const cleaned = computed(() => thinkRest.value.rest)
 const sourceLine = computed(() => splitSourceLine(cleaned.value))
 const body = computed(() => sourceLine.value.body)
 const sourceTokens = computed(() => sourceLine.value.tokens)
+
+// Only show source tokens that have a matching citation in props.citations.
+// Guards against two failure modes: (1) LLM hallucinating [N] with no
+// retrieved chunks (citations = []) and (2) LLM citing an index out of
+// range. Either way, dangling [N] buttons render as broken UI.
+const validSourceTokens = computed<number[]>(() => {
+  const cites = props.citations
+  if (!cites || cites.length === 0) return []
+  const max = cites.length
+  return sourceTokens.value.filter(n => n >= 1 && n <= max)
+})
 
 // 3) Belt-and-suspenders: strip any stray [n] markers the LLM may still have
 //    left inline in the body.
@@ -136,21 +182,32 @@ async function refreshMermaid(): Promise<void> {
 
 onMounted(refreshMermaid)
 watch(renderedHtml, refreshMermaid)
+// Restore + persist thinking open/close. flush:'post' ensures detailsRef is
+// populated (the v-if element exists) by the time we read it.
+watch([think, detailsRef], () => {
+  syncThinkOpenState().catch(() => { /* localStorage may be blocked */ })
+}, { flush: 'post', immediate: true })
+onBeforeUnmount(() => {
+  if (detailsRef.value && thinkToggleHandler) {
+    detailsRef.value.removeEventListener('toggle', thinkToggleHandler)
+    thinkToggleHandler = null
+  }
+})
 </script>
 
 <template>
   <div :class="['bubble-row', role]">
     <div :class="['bubble', role]">
-      <details v-if="role === 'assistant' && think" class="think-section">
+      <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section">
         <summary>思考过程</summary>
         <div class="think-body">{{ think }}</div>
       </details>
       <div v-if="role === 'assistant'" ref="bubbleEl" class="md-body" v-html="renderedHtml"></div>
       <div v-else class="plain-body">{{ bodyNoCite }}</div>
-      <div v-if="role === 'assistant' && sourceTokens.length" class="source-line">
+      <div v-if="role === 'assistant' && validSourceTokens.length" class="source-line">
         <span>\u6765\u6e90\uff1a</span>
         <button
-          v-for="n in sourceTokens"
+          v-for="n in validSourceTokens"
           :key="n"
           class="cite-btn"
           :class="{ active: activeIndex === n }"
