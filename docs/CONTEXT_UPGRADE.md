@@ -6,13 +6,39 @@
 
 ---
 
+## 实施状态（截至 2026-08-25）
+
+| Phase | 项目 | 状态 | Commit |
+|---|---|---|---|
+| 1.1 | `answer.py` 历史滑窗 | [x] | `262fa84` |
+| 1.2 | `chat.ts` `clear()` 保护 + `loadFromSession` inFlight 解耦 | [x] | `b9d8891` |
+| 2.1 | `db.py` `get_messages(session_id, limit)` | [x] | `f2af3a2` |
+| 2.2 | `chat.py` `_build_initial_state` 用 DB 历史覆盖前端 payload | [x] | `f2af3a2` |
+| 3.1 | `state.py` `messages: Annotated[list, operator.add]` | [x] | `d07072d` |
+| 3.2 | `graph.py` 编译挂 `MemorySaver` checkpointer | [x] | `d07072d` |
+| 3.3 | `chat.py` `thread_id` config + messages 累加合并 | [x]（partial，未切 stream_mode）| `d07072d` |
+| 3.4 | `answer.py` 删 Phase 1 滑窗补丁 | [ ] 延后 | — |
+| 3.5 | 前端 `chat.ts` 只发当前 turn | [x] | `293ff16` |
+| 4.1 | `prompts/config.yaml` + 默认回退 | [x] | `9e7cb3f` |
+| 4.2 | `format_context` 抽到 `app/agent/context.py` | [x] | `f998114` |
+
+**3.4 延后原因**：当前节点均不回 `messages`，checkpointer 里的 `state.messages` 只积累 user 消息、缺 assistant 消息。若直接删 `answer.py` 的滑窗，`_build_messages` 会读到不完整的历史（看不到之前的助手回复），反而退化。要做 3.4 需要让 `answer_node` 把助手回复 append 进 state.messages——这是另一种破坏性更大的改动，建议单独立项并配合回归测试。
+
+**3.3 partial 说明**：保留了文档原本的 default stream event 模式，只加了 `config` 传入 `thread_id`，没有切到 `stream_mode="messages"`。后者会改变 SSE 形状（从 node-event 流变成 LLM-token 流），属于另一个独立重构。
+
+每项改动落地时都写了对应的烟雾测试（执行后即删，未入库）。
+
+---
+
+
+
 ## 0. 现状问题清单（三个）
 
 | # | 问题 | 根因 | 文件 |
 |---|---|---|---|
-| B1 | 追问必挂（"那它呢"答非所问） | `answer.py::_build_messages` 只发 `SystemMessage + 当前问题`，历史收了但从没进 LLM | `backend/app/agent/nodes/answer.py` |
-| B2 | 切页面回来丢思考提示 | `chat.ts::clear()` 把 in-flight 的 messages/snapshot 清零，绕过了 snapshot 恢复逻辑 | `frontend/src/stores/chat.ts` |
-| B3 | 上下文由前端全量重发 | payload 越聊越大 + 前端可伪造/篡改历史 + 前后端状态易不一致 | `chat.ts` send / `chat.py` |
+| B1 | 追问必挂 [x] 修于 `262fa84` |（"那它呢"答非所问） | `answer.py::_build_messages` 只发 `SystemMessage + 当前问题`，历史收了但从没进 LLM | `backend/app/agent/nodes/answer.py` |
+| B2 | 切页面回来丢思考提示 [x] 修于 `b9d8891` | | `chat.ts::clear()` 把 in-flight 的 messages/snapshot 清零，绕过了 snapshot 恢复逻辑 | `frontend/src/stores/chat.ts` |
+| B3 | 上下文由前端全量重发 [x] 修于 `f2af3a2` + `293ff16` | | payload 越聊越大 + 前端可伪造/篡改历史 + 前后端状态易不一致 | `chat.ts` send / `chat.py` |
 
 ---
 
@@ -47,7 +73,7 @@ Phase 4  配置化 + 注入点（配合 Router） → 提示词三层覆盖 + �
 
 ## 2. Phase 1：止血
 
-### 2.1 `answer.py` — 历史滑窗进 prompt（修 B1）
+### 2.1 [x] `answer.py`  [commit `262fa84`] — 历史滑窗进 prompt（修 B1）
 
 **改动点**：`_build_messages()` 加历史滑窗。
 
@@ -87,7 +113,7 @@ def _build_messages(state: AgentState):
 
 **滑窗为什么是 8 条**：覆盖绝大多数追问场景；token 成本线性可控；过长历史会稀释 LLM 注意力。
 
-### 2.2 `chat.ts` — `clear()` 保护流状态（修 B2）
+### 2.2 [x] `chat.ts`  [commit `b9d8891`] — `clear()` 保护流状态（修 B2）
 
 **改动点一**：`clear()` 动作加 in-flight 保护。
 
@@ -119,7 +145,7 @@ const inFlight = this.isStreaming && this.streamingSessionId !== null
 
 **原理**：把「是否在流」这件事和 `messages.length` 解耦——`clear()` 不再误杀，`loadFromSession` 里那段 `streamingSnapshot && streamingSessionId === sessionId` 的恢复路径（原本就写好了）就能正常触发。
 
-### 2.3 Phase 1 验收
+### 2.3 [x] Phase 1 验收
 
 | 用例 | 预期 |
 |---|---|
@@ -132,7 +158,7 @@ const inFlight = this.isStreaming && this.streamingSessionId !== null
 
 **核心思想**：后端以 `ChatMessage` 表为真相源读取历史，不再信任前端 payload。前端仍可发送 messages（兼容过渡），但后端用 DB 历史为准。
 
-### 3.1 `storage/db.py` — 新增读历史函数
+### 3.1 [x] `storage/db.py`  [commit `f2af3a2`] — 新增读历史函数
 
 > ⚠️ 需确认：`db.py` 现有 `create_session` / `append_message` 两个已核对；是否已有「按 session 读消息」函数需查一下，没有就新增。
 
@@ -151,7 +177,7 @@ def get_messages(session_id: str, limit: int = 16) -> list[dict]:
   return [{"role": m.role, "content": m.content} for m in reversed(rows)]
 ```
 
-### 3.2 `chat.py` — 用 DB 历史覆盖前端 payload
+### 3.2 [x] `chat.py`  [commit `f2af3a2`] — 用 DB 历史覆盖前端 payload
 
 在 `initial_state` 组装处，用 DB 历史替换 `body.messages`：
 
@@ -170,7 +196,7 @@ initial_state = {
 
 **效果**：即使前端伪造/清空了 messages，后端也以自己 DB 里的历史为准。前端 `chat.ts` 的 `history` 字段暂时保留（过渡期），Phase 3 起不再需要。
 
-### 3.3 Phase 2 验收
+### 3.3 [x] Phase 2 验收
 
 | 用例 | 预期 |
 |---|---|
@@ -183,7 +209,7 @@ initial_state = {
 
 > 这一阶段和 `OPTIMIZATION.md` §2.4「图接管 SSE 编排」是同一件事，建议和 Router 节点一起做，避免动两次 graph。
 
-### 4.1 `state.py` — messages 改累加式
+### 4.1 [x] `state.py`  [commit `d07072d`] — messages 改累加式
 
 ```python
 import operator
@@ -194,7 +220,7 @@ class AgentState(TypedDict, total=False):
   # 其余字段不动
 ```
 
-### 4.2 `graph.py` — 编译挂 checkpointer
+### 4.2 [x] `graph.py`  [commit `d07072d`] — 编译挂 checkpointer
 
 ```python
 # 先跑通用内存版（零依赖），验证 OK 再换 SQLite
@@ -207,7 +233,7 @@ def build_compiled_graph():
 
 > ⚠️ 需确认：LangGraph 1.2 的 SQLite checkpointer 确切导入路径（`langgraph-checkpoint-sqlite` 依赖）。持久化版用 `AsyncSqliteSaver.from_conn_string("data/agent_history.db")`。先用 `MemorySaver` 证明「thread_id 恢复历史」能跑通，再换 SQLite。
 
-### 4.3 `chat.py` — 改走 `graph.astream`
+### 4.3 [x-partial] `chat.py`  [commit `d07072d`] — 改走 `graph.astream`
 
 ```python
 config = {"configurable": {"thread_id": session_id}}
@@ -217,11 +243,11 @@ async for chunk in graph.astream(input_state, config=config, stream_mode="messag
   # 现有 SSE 产出逻辑（session/stage/delta/citations/done）搬进来
 ```
 
-### 4.4 `answer.py` — 删掉 Phase 1 的历史滑窗补丁
+### 4.4 [ ] 延后 `answer.py`  (见上文 3.4 延后原因) — 删掉 Phase 1 的历史滑窗补丁
 
 `state["messages"]` 此时由 checkpointer 自动累加，已经是全量历史；滑窗（取最后 8 条）在节点内做即可。
 
-### 4.5 前端 `chat.ts` — 只发新消息 + session_id
+### 4.5 [x] 前端  [commit `293ff16`] `chat.ts` — 只发新消息 + session_id
 
 ```ts
 // send() 里 history 字段改为：
@@ -229,7 +255,7 @@ const history = [{ role: 'user', content: text }]   // 只发这一条
 // session_id 仍传 this.sessionId
 ```
 
-### 4.6 保命开关
+### 4.6 [x] 保命开关  (HD_USE_GRAPH 此前已存在，`f2af3a2` 起配合 DB 历史)
 
 ```python
 # chat.py 顶部
@@ -244,12 +270,12 @@ else:
 
 ---
 
-## 5. Phase 4：配置化 + 注入点
+## 5. [x] Phase 4：配置化 + 注入点
 
 | 项 | 改动 |
 |---|---|
-| 提示词配置化 | `ANSWER_INSTRUCTIONS` 挪到 `backend/app/agent/prompts/config.yaml`，加载顺序「默认值 → YAML → 请求参数」 |
-| 注入点拆分 | Router 节点落地时，把「模型选择 / system prompt / 检索注入」拆成独立函数，未来升级成 middleware 式（对齐参考项目 `context_middlewares.py` 模式） |
+| 提示词配置化 [x] (`9e7cb3f`) | `ANSWER_INSTRUCTIONS` 挪到 `backend/app/agent/prompts/config.yaml`，加载顺序「默认值 → YAML → 请求参数」 |
+| 注入点拆分 [x-partial] (`f998114`) | 「模型选择」 (`llm/factory.py`) / 「system prompt」 (`prompts/`) / 「检索注入」 (`context.py`) 三个关注点已拆到独立模块。Router 节点落地时，把「模型选择 / system prompt / 检索注入」拆成独立函数，未来升级成 middleware 式（对齐参考项目 `context_middlewares.py` 模式） |
 
 ---
 
@@ -257,10 +283,10 @@ else:
 
 | # | 能力 | 验收用例 |
 |---|---|---|
-| 1 | 多轮上下文 | 连续 5 轮追问均能正确指代，不答非所问 |
-| 2 | 状态不丢 | 流式中切页再切回，思考提示与流不中断 |
-| 3 | 真相源唯一 | 前端清空 messages 后，后端仍能还原历史 |
-| 4 | 可回滚 | `HD_USE_GRAPH=false` 一键退回直调路径 |
+| 1 | 多轮上下文 [x] | 连续 5 轮追问均能正确指代，不答非所问 |
+| 2 | 状态不丢 [x] | 流式中切页再切回，思考提示与流不中断 |
+| 3 | 真相源唯一 [x] | 前端清空 messages 后，后端仍能还原历史 |
+| 4 | 可回滚 [x] | `HD_USE_GRAPH=false` 一键退回直调路径 |
 
 ---
 
@@ -279,12 +305,12 @@ else:
 
 | 文件 | Phase | 改动类型 |
 |---|---|---|
-| `backend/app/agent/nodes/answer.py` | 1 / 3 / 4 | 加历史滑窗 → 删滑窗改读 state → 提示词抽 YAML |
-| `frontend/src/stores/chat.ts` | 1 / 3 | clear() 保护 + inFlight 解耦 → 只发新消息 |
-| `backend/app/storage/db.py` | 2 | 新增 get_messages（需先确认是否已有） |
-| `backend/app/api/chat.py` | 2 / 3 | DB 历史 → graph.astream + 开关 |
-| `backend/app/agent/state.py` | 3 | messages 累加式 |
-| `backend/app/agent/graph.py` | 3 | 挂 checkpointer |
+| `backend/app/agent/nodes/answer.py` | 1 / 3 / 4 | [x] 1.1 滑窗 (`262fa84`); [x] 4.1 prompt 改 YAML (`9e7cb3f`); [ ] 3.4 删滑窗延后 |
+| `frontend/src/stores/chat.ts` | 1 / 3 | [x] 1.2 clear() 保护 (`b9d8891`); [x] 3.5 只发新消息 (`293ff16`) |
+| `backend/app/storage/db.py` | 2 | [x] 新增 `get_messages(session_id, limit)` (`f2af3a2`) |
+| `backend/app/api/chat.py` | 2 / 3 | [x] 2.2 DB 历史 (`f2af3a2`); [x-partial] 3.3 thread_id config，未切 stream_mode (`d07072d`) |
+| `backend/app/agent/state.py` | 3 | [x] messages 改 `Annotated[list, operator.add]` (`d07072d`) |
+| `backend/app/agent/graph.py` | 3 | [x] 挂 `MemorySaver` checkpointer (`d07072d`) |
 
 ---
 
@@ -292,7 +318,7 @@ else:
 
 | 依赖 | Phase | 说明 |
 |---|---|---|
-| `langgraph-checkpoint-sqlite` | 3 | 持久化 checkpointer（MemorySaver 阶段不需要） |
-| `aiosqlite` | 3 | AsyncSqliteSaver 底层 |
+| `langgraph-checkpoint-sqlite` | 3 | **未加**：当前 `MemorySaver` 满足基础需求；升级到 SQLite 持久化时再加。 |
+| `aiosqlite` | 3 | **未加**：同上。 |
 
-> Phase 1、2 **零新增依赖**，可立即开工。
+> Phase 1-4 **零新增依赖**（PyYAML 早就在依赖里）。langgraph-checkpoint-sqlite / aiosqlite 留待持久化升级时再装。
