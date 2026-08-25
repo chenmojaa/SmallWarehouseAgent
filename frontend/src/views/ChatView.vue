@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import { useModelsStore } from '@/stores/models'
 import { NSpace, NInput, NButton, NText, NSwitch } from 'naive-ui'
 import MessageBubble from '@/components/MessageBubble.vue'
+import ThinkingIndicator from '@/components/ThinkingIndicator.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import CitationPreview from '@/components/CitationPreview.vue'
 import IngestResultCard from '@/components/IngestResultCard.vue'
@@ -18,63 +19,19 @@ const route = useRoute()
 
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
-const stageLabel = computed(() => {
-  // While the model is mid-reasoning (inside a <think> block), prefer the
-  // "思考中..." label so the user knows the model is working, not stalled.
-  // Falls through to the pipeline-stage label once reasoning completes.
-  if (chat.thinking) return "思考中..."
-  const s = chat.stage
-  if (!s) return "正在思考..."
-  if (s.stage === "rag_search" && s.status === "started") return "检索知识库中..."
-  if (s.stage === "router" && s.status === "started") return "识别意图中..."
-  if (s.stage === "router" && s.status === "done") {
-    return s.intent ? `路由 -> ${s.intent}` : "路由完成"
-  }
-  if (s.stage === "rag_search" && s.status === "done") {
-    return s.hits && s.hits > 0
-      ? `检索到 ${s.hits} 条（${Math.round(s.ms ?? 0)}ms）`
-      : "未找到相关内容"
-  }
-  if (s.stage === "llm_stream" && s.status === "started") return "生成回答中..."
-  if (s.stage === "agent" && s.status === "started") {
-    return s.agent === "research" ? "多轮检索中..."
-      : s.agent === "ingest"  ? "入库中..."
-      : s.agent === "report"  ? "生成周报中..." : "agent 运行中"
-  }
-  if (s.stage === "agent" && s.status === "done") {
-    if (s.agent === "research") return `研究完成 (${s.iterations || 0} 轮)`
-    if (s.agent === "ingest")  return "入库完成"
-    if (s.agent === "report")  return "周报已生成"
-  }
-  return "正在思考..."
+
+// Drives the inline ThinkingIndicator. Two cases when the indicator
+// should appear:
+//   1. The last message is an empty assistant placeholder (the ghost-asst
+//      that send() pushes before the first delta arrives), OR
+//   2. We are mid-<think> even though the visible body has content (so the
+//      user understands content is stalled because the model is reasoning).
+const thinkingVisible = computed(() => {
+  if (!chat.isStreaming) return false
+  const last = chat.messages[chat.messages.length - 1]
+  if (!last || last.role !== 'assistant') return false
+  return !last.content.trim() || chat.thinking
 })
-const elapsed = ref(0)
-let timerId: number | null = null
-let tickStart = 0
-
-function startTimer() {
-  stopTimer()
-  tickStart = Date.now()
-  elapsed.value = 0
-  timerId = window.setInterval(() => {
-    elapsed.value = Math.floor((Date.now() - tickStart) / 1000)
-  }, 1000)
-}
-
-function stopTimer() {
-  if (timerId !== null) {
-    window.clearInterval(timerId)
-    timerId = null
-  }
-  elapsed.value = 0
-}
-
-watch(() => chat.streamingHere, (streaming) => {
-  if (streaming) startTimer()
-  else stopTimer()
-})
-
-onBeforeUnmount(stopTimer)
 
 async function loadByRoute() {
   const id = route.params.id as string | undefined
@@ -158,16 +115,13 @@ function onKey(e: KeyboardEvent) {
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" class="msg-row">
           <MessageBubble
-            v-if="!(chat.streamingHere && m.role === 'assistant' && (!m.content || chat.thinking))"
+            v-if="!(chat.isStreaming && m.role === 'assistant' && (!m.content.trim() || chat.thinking))"
             :role="m.role"
             :content="m.content"
             :citations="m.citations"
             :active-index="m.activeCitationIndex ?? null"
             @update:active-index="(n: number) => chat.setActiveCitation(m.id, n <= 0 ? null : n)"
           />
-          <div v-else class="thinking-row">
-            <div class="thinking-bubble">{{ stageLabel }}（{{ elapsed }}s）</div>
-          </div>
           <CitationPreview
             v-if="m.role === 'assistant' && m.citations && m.citations.length > 0 && m.activeCitationIndex != null && m.activeCitationIndex >= 1 && m.citations[m.activeCitationIndex - 1]"
             class="citations-row"
@@ -183,6 +137,11 @@ function onKey(e: KeyboardEvent) {
             <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
           </div>
         </div>
+        <!-- Standalone thinking indicator. Shows only when the last
+             message is an empty assistant placeholder OR we are mid-<think>.
+             When the asst starts streaming real text and we are not in
+             <think>, MessageBubble takes over and this hides itself. -->
+        <ThinkingIndicator :show="thinkingVisible" />
       </div>
     </div>
 
@@ -273,16 +232,6 @@ function onKey(e: KeyboardEvent) {
 
 /* ====== 消息行（聊天态） ====== */
 .msg-row { margin-bottom: 12px; }
-.thinking-row { display: flex; justify-content: flex-start; }
-.thinking-bubble {
-  max-width: 70%;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: var(--bg-bubble-thinking);
-  color: var(--text-muted);
-  font-size: 14px;
-  line-height: 1.6;
-}
 .citations-row { margin-top: 6px; }
 .ingest-row { margin-top: 6px; }
 .report-row {
@@ -411,3 +360,8 @@ function onKey(e: KeyboardEvent) {
 }
 .hint-icon { font-size: 13px; }
 </style>
+          <!-- Use chat.isStreaming (not chat.streamingHere) so the ghost-asst
+               is also masked during the welcome -> new-session window where
+               streamingSessionId hasn't been bound yet (that was the bug). -->
+          <MessageBubble
+            v-if="!(chat.isStreaming && m.role === 'assistant' && (!m.content.trim() || chat.thinking))"
