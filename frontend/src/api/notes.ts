@@ -13,6 +13,7 @@ export interface Note {
   chunk_count: number
   embedded: boolean
   created_at?: string
+  view_url?: string | null
 }
 
 export interface NotesList {

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
   feishu_space_ids: str = ""          # comma-separated list; empty = all visible spaces
   feishu_sync_interval_min: int = 15   # minutes between sync runs
   feishu_page_size: int = 50
+  feishu_web_url: str = ""             # for constructing view URLs e.g. https://{tenant}.feishu.cn
 
   # ---- Agent / Router (OPTIMIZATION.md \u00a72.5) ----
   use_graph: bool = True                       # HD_USE_GRAPH; false = legacy direct-call path

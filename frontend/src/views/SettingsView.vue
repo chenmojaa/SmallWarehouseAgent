@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useModelsStore, type ReasoningLevel, type CustomModelEntry } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
 import { detectModels } from '@/api/custom-models'
+import { getFeishuConfig, updateFeishuConfig } from '@/api/feishu'
 import {
   NCard, NSpace, NText, NTag, NInput, NButton, useMessage,
   NPopconfirm, NEmpty,
@@ -18,8 +19,15 @@ const formApiKey = ref('')
 const detecting = ref(false)
 const saving = ref(false)
 const detected = ref<{ provider: string; models: string[] } | null>(null)
+
+// Feishu config
+const feishuWebUrl = ref('')
+const feishuLoading = ref(false)
+const feishuSaving = ref(false)
+
 onMounted(() => {
   settings.init()
+  loadFeishuConfig()
 })
 
 async function doDetect() {
@@ -71,6 +79,30 @@ async function saveEntry() {
 async function removeEntry(id: string) {
   const ok = await models.remove(id)
   message[ok ? 'info' : 'error'](ok ? '已删除' : '删除失败: ' + (models.lastError || 'unknown'))
+}
+
+async function loadFeishuConfig() {
+  feishuLoading.value = true
+  try {
+    const cfg = await getFeishuConfig()
+    feishuWebUrl.value = cfg.web_url || ''
+  } catch (e) {
+    // silent fail - config may not be available
+  } finally {
+    feishuLoading.value = false
+  }
+}
+
+async function saveFeishuConfig() {
+  feishuSaving.value = true
+  try {
+    await updateFeishuConfig(feishuWebUrl.value.trim())
+    message.success('飞书配置已保存')
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    feishuSaving.value = false
+  }
 }
 </script>
 
@@ -129,6 +161,25 @@ async function removeEntry(id: string) {
 
 
         </n-card>
+      </n-space>
+    </n-card>
+
+    <n-card title="飞书知识库配置" :bordered="false">
+      <n-space vertical :size="10">
+        <n-text depth="3" style="font-size: 12px">配置飞书文档的查看域名，用于在知识库中生成"查看"链接</n-text>
+        <n-input
+          v-model:value="feishuWebUrl"
+          placeholder="例：https://xxx.feishu.cn"
+          :disabled="feishuLoading"
+        />
+        <n-button
+          type="primary"
+          :loading="feishuSaving"
+          :disabled="feishuLoading"
+          @click="saveFeishuConfig"
+        >
+          保存飞书配置
+        </n-button>
       </n-space>
     </n-card>
   </div>

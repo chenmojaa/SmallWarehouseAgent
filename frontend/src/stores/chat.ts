@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { chatStream, stripThink, type ChatMessage, type Citation } from '@/api/chat'
+import { chatStream, stripThink, type ChatMessage, type Citation, type IngestResult, type ReportResult } from '@/api/chat'
 import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
@@ -24,12 +24,14 @@ export interface PipelineStage {
 
 interface State {
   sessionId: string | null
+  loadToken: number
   messages: Msg[]
   isStreaming: boolean
   error: string | null
   useRag: boolean
   abortCtl: AbortController | null
   streamingSessionId: string | null
+  streamingMessageId: string | null
   stage: PipelineStage | null
   // Saved in-flight messages when the user navigates AWAY from a streaming
   // session. Restored when they come back so the partial answer + the
@@ -45,12 +47,14 @@ interface State {
 export const useChatStore = defineStore("chat", {
   state: (): State => ({
     sessionId: null,
+    loadToken: 0,
     isStreaming: false,
     messages: [],
     error: null,
     useRag: true,
     abortCtl: null,
     streamingSessionId: null,
+    streamingMessageId: null,
     stage: null,
     streamingSnapshot: null,
     thinking: false,
@@ -60,14 +64,16 @@ export const useChatStore = defineStore("chat", {
   },
   actions: {
     toggleRag() { this.useRag = !this.useRag },
-        async send(text: string) {
+    async send(text: string) {
       if (!text.trim()) return
+      if (this.isStreaming) return
     if (this.streamingSessionId !== null && this.streamingSessionId === this.sessionId) return
       const userMsg: Msg = { id: 'u-' + String(Date.now()), role: 'user', content: text }
       const asstMsg: Msg = { id: 'a-' + String(Date.now() + 1), role: 'assistant', content: '' }
       this.messages.push(userMsg, asstMsg)
       this.isStreaming = true
       this.streamingSessionId = this.sessionId
+      this.streamingMessageId = asstMsg.id
       this.error = null
       this.stage = null
       this.abortCtl = new AbortController()
@@ -193,6 +199,7 @@ export const useChatStore = defineStore("chat", {
       } finally {
         this.isStreaming = false
         this.streamingSessionId = null
+        this.streamingMessageId = null
         this.abortCtl = null
         this.stage = null
         this.thinking = false
@@ -200,6 +207,8 @@ export const useChatStore = defineStore("chat", {
       }
     },
     async loadFromSession(sessionId: string) {
+      const token = ++this.loadToken
+      this.error = null
       // Three in-flight scenarios we have to protect so the partial answer and
       // the thinking row don't disappear the moment the user navigates:
       //
@@ -237,18 +246,29 @@ export const useChatStore = defineStore("chat", {
 
       if (leavingStream) {
         // (C): save in-flight state for the round-trip.
-        this.streamingSnapshot = [...this.messages]
+        const messages = [...this.messages]
+        const assistantId = this.streamingMessageId
+        if (assistantId && !messages.some(m => m.id === assistantId)) {
+          messages.push({ id: assistantId, role: 'assistant', content: '' })
+        }
+        this.streamingSnapshot = messages
       }
 
       const sessions = useSessionsStore()
       await sessions.loadDetail(sessionId)
+      if (token !== this.loadToken) return
       const detail = sessions.currentDetail
-      if (!detail) { this.error = "Session not found"; return }
+      if (!detail || detail.id !== sessionId) { this.error = "Session not found"; return }
 
       // Coming back to a still-streaming session from somewhere else.
-      if (this.streamingSnapshot && this.streamingSessionId === sessionId) {
+      if (this.isStreaming && this.streamingSnapshot && this.streamingSessionId === sessionId) {
         this.sessionId = detail.id
-        this.messages = this.streamingSnapshot
+        const messages = [...this.streamingSnapshot]
+        const assistantId = this.streamingMessageId
+        if (assistantId && !messages.some(m => m.id === assistantId)) {
+          messages.push({ id: assistantId, role: 'assistant', content: '' })
+        }
+        this.messages = messages
         this.streamingSnapshot = null
         this.error = null
         return
@@ -264,7 +284,14 @@ export const useChatStore = defineStore("chat", {
         content: m.content,
         citations: m.citations || undefined,
       }))
-      this.streamingSnapshot = null
+      const snapshotBelongsToBackgroundStream =
+        this.isStreaming &&
+        this.streamingSnapshot !== null &&
+        this.streamingSessionId !== null &&
+        this.streamingSessionId !== sessionId
+      if (!snapshotBelongsToBackgroundStream) {
+        this.streamingSnapshot = null
+      }
       this.error = null
     },
     clear() {
@@ -275,7 +302,12 @@ export const useChatStore = defineStore("chat", {
       // session lands on stale DB rows and the in-flight assistant bubble
       // (including the streaming "思考中..." placeholder) disappears.
       if (this.isStreaming && this.streamingSessionId !== null && this.messages.length > 0) {
-        this.streamingSnapshot = [...this.messages]
+        const messages = [...this.messages]
+        const assistantId = this.streamingMessageId
+        if (assistantId && !messages.some(m => m.id === assistantId)) {
+          messages.push({ id: assistantId, role: 'assistant', content: '' })
+        }
+        this.streamingSnapshot = messages
         this.sessionId = null
         this.error = null
         return

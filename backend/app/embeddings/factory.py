@@ -14,17 +14,12 @@ OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
 def _resolve_url(base_url):
   if base_url:
     return base_url.rstrip("/") + "/embeddings"
-  provider = (settings.embedding_provider or "openai").strip()
-  if provider == "openai":
-    fallback = (
-      (settings.embedding_api_base or "").strip()
-      or (settings.llm_api_base or "").strip()
-      or OPENAI_DEFAULT_BASE
-    )
-    return fallback.rstrip("/") + "/embeddings"
-  raise NotImplementedError(
-    f"Embedding provider not yet implemented: {provider!r}. Pass base_url= to override at call site."
+  fallback = (
+    (settings.embedding_api_base or "").strip()
+    or (settings.llm_api_base or "").strip()
+    or OPENAI_DEFAULT_BASE
   )
+  return fallback.rstrip("/") + "/embeddings"
 
 
 def _resolve_key(api_key):

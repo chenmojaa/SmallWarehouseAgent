@@ -19,6 +19,16 @@ Start-Process -FilePath 'D:\one_agent\backend\.venv\Scripts\python.exe' `
   -RedirectStandardError  'D:\one_agent\backend\uvicorn.err.log' `
   -WindowStyle Hidden
 
+Write-Host '== Wait for backend ==' -Foreground Cyan
+$backendReady = $false
+for ($i = 0; $i -lt 30; $i++) {
+  try {
+    $response = Invoke-WebRequest 'http://127.0.0.1:8001/api/health' -UseBasicParsing -TimeoutSec 1
+    if ($response.StatusCode -eq 200) { $backendReady = $true; break }
+  } catch { Start-Sleep -Seconds 1 }
+}
+if (-not $backendReady) { Write-Host 'Backend failed to start; see backend\uvicorn.err.log' -Foreground Red }
+
 Write-Host '== Boot frontend (Vite on 127.0.0.1:5174) ==' -Foreground Cyan
 Start-Process -FilePath 'cmd.exe' `
   -ArgumentList '/c','npm run dev' `

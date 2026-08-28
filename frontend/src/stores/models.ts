@@ -15,6 +15,7 @@ export type { ReasoningLevel, CustomModelEntry }
 // Legacy localStorage keys (kept so we can migrate old data on first load).
 const LEGACY_LIST_KEY = 'sb_custom_models'
 const LEGACY_SELECTED_KEY = 'sb_selected_model'
+const MODELS_CACHE_KEY = 'hd_models_cache_v1'
 
 interface State {
   list: CustomModelEntry[]
@@ -35,6 +36,21 @@ function parseLegacy(raw: string | null): CustomModelEntry[] {
     return []
   }
   return []
+}
+
+function readModelsCache(): { items: CustomModelEntry[]; selectedId: string | null } {
+  try {
+    const raw = localStorage.getItem(MODELS_CACHE_KEY)
+    const value = raw ? JSON.parse(raw) : null
+    if (value && Array.isArray(value.items)) {
+      return { items: value.items, selectedId: value.selectedId ?? null }
+    }
+  } catch {}
+  return { items: [], selectedId: null }
+}
+
+function writeModelsCache(items: CustomModelEntry[], selectedId: string | null) {
+  try { localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify({ items, selectedId })) } catch {}
 }
 
 export const useModelsStore = defineStore('models', {
@@ -97,6 +113,7 @@ export const useModelsStore = defineStore('models', {
             this.selectedId = legacySelected
           }
         }
+        writeModelsCache(this.list, this.selectedId)
 
         // Drop the legacy cache once we have backend state.
         try {
@@ -108,6 +125,14 @@ export const useModelsStore = defineStore('models', {
       } catch (e) {
         this.lastError = (e as Error).message || String(e)
         console.error('[models] loadFromBackend failed:', this.lastError)
+        const cached = readModelsCache()
+        if (cached.items.length > 0) {
+          this.list = cached.items
+          this.selectedId = cached.selectedId && cached.items.some(x => x.id === cached.selectedId)
+            ? cached.selectedId
+            : cached.items[0]?.id ?? null
+          this.loaded = true
+        }
       } finally {
         this.loading = false
       }
@@ -129,6 +154,7 @@ export const useModelsStore = defineStore('models', {
         const i = this.list.findIndex(x => x.id === placeholder.id)
         if (i >= 0) this.list[i] = saved
         if (this.selectedId === placeholder.id) this.selectedId = saved.id
+        writeModelsCache(this.list, this.selectedId)
         return true
       } catch (e) {
         // Rollback
@@ -150,6 +176,7 @@ export const useModelsStore = defineStore('models', {
       try {
         const saved = await updateCustomModel(id, patch)
         if (i >= 0) this.list[i] = saved
+        writeModelsCache(this.list, this.selectedId)
         return true
       } catch (e) {
         if (i >= 0 && original) this.list[i] = original
@@ -167,9 +194,10 @@ export const useModelsStore = defineStore('models', {
         this.selectedId = this.list[0]?.id ?? null
       }
 
-      try {
-        await deleteCustomModel(id)
-        if (wasSelected) await setSelectedModel(this.selectedId)
+        try {
+          await deleteCustomModel(id)
+          if (wasSelected) await setSelectedModel(this.selectedId)
+          writeModelsCache(this.list, this.selectedId)
         return true
       } catch (e) {
         this.list = originalList
@@ -185,6 +213,7 @@ export const useModelsStore = defineStore('models', {
       this.selectedId = id
       try {
         await setSelectedModel(id)
+        writeModelsCache(this.list, this.selectedId)
         return true
       } catch (e) {
         this.selectedId = original

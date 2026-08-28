@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent,
   NMessageProvider, NSpace, NText, NButton, darkTheme, lightTheme,
@@ -32,11 +32,22 @@ const models = useModelsStore()
 
 const naiveTheme = computed(() => settings.theme === 'light' ? lightTheme : darkTheme)
 
+let retryTimer: number | null = null
+function retryFailedLoads() {
+  if (sessions.error) sessions.load()
+  if (models.lastError) models.loadFromBackend()
+}
+
 onMounted(() => {
   settings.init()
   settings.fetch()
   sessions.load()
   models.loadFromBackend()
+  retryTimer = window.setInterval(retryFailedLoads, 8000)
+})
+
+onBeforeUnmount(() => {
+  if (retryTimer !== null) window.clearInterval(retryTimer)
 })
 
 watch(() => settings.theme, () => { /* applied via setTheme */ })

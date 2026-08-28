@@ -3,10 +3,21 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionsStore } from '@/stores/sessions'
 import { useChatStore } from '@/stores/chat'
+import { useModelsStore } from '@/stores/models'
+import {
+  installRecommendedSkill,
+  listInstalledSkills,
+  listRecommendedSkills,
+  removeInstalledSkill,
+  uploadSkillFiles,
+  type InstalledSkill,
+  type RecommendedSkill,
+} from '@/api/skills'
 import { NButton, NPopconfirm, NEmpty, NSpin, NText, NModal, NCard, NSpace, NInput, NTag } from 'naive-ui'
 
 const sessions = useSessionsStore()
 const chat = useChatStore()
+const models = useModelsStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -28,6 +39,11 @@ async function openSession(id: string) {
     return
   }
   router.push({ name: 'chat-id', params: { id } })
+}
+
+function retryInitialLoad() {
+  sessions.load()
+  models.loadFromBackend()
 }
 
 async function removeSession(id: string, e: Event) {
@@ -62,31 +78,136 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
 
 // === Skill dialog ===
 const skillOpen = ref(false)
-const skillTab = ref<"featured" | "all" | "mine">("featured")
+const skillTab = ref<'recommended' | 'mine'>('recommended')
+const recommended = ref<RecommendedSkill[]>([])
+const installedSkills = ref<InstalledSkill[]>([])
+const skillsLoading = ref(false)
+const skillError = ref('')
+const uploading = ref(false)
+const installingId = ref('')
+const installingAll = ref(false)
+const uploadProgress = ref('')
+const dragActive = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const folderInput = ref<HTMLInputElement | null>(null)
 
-interface SkillDef { id: string; name: string; emoji: string; desc: string; category: string; badge?: string }
-
-const FEATURED: SkillDef[] = [
-  { id: "web-search",     name: "Web Search",     emoji: "🔎", desc: "联网搜索、来源直达",         category: "research",     badge: "热推" },
-  { id: "code-review",    name: "Code Review",    emoji: "🧪", desc: "解读 diff 提出改进建议",     category: "dev",          badge: "热门" },
-  { id: "doc-summarizer", name: "Doc Summarizer", emoji: "📝", desc: "长文要点 + 三段式摘要",      category: "productivity", badge: "编辑推荐" },
-  { id: "sql-coach",      name: "SQL Coach",      emoji: "🗃️", desc: "自然语言转 SQL 解释",        category: "dev" },
-  { id: "travel-planner", name: "Travel Planner", emoji: "🧳", desc: "行程 / 票务 / 路线",        category: "life" },
-  { id: "translator",     name: "Bilingual 译员",  emoji: "🌐", desc: "中英双向 + 风格选择",       category: "productivity" },
-  { id: "image-prompt",   name: "Image Prompt",   emoji: "🎨", desc: "文字 → DALL·E/MJ 提示词",  category: "creative" },
-  { id: "math-tutor",     name: "Math Tutor",     emoji: "∑",  desc: "中学到竞赛级逐步讲解",     category: "study" },
-]
-
-const installed = ref<Record<string, true>>({})
-const featuredSkills = computed(() => FEATURED.slice(0, 5))
-const allSkills = computed(() => FEATURED)
-
-function openSkill() { skillOpen.value = true; skillTab.value = "featured" }
-function toggleInstall(s: SkillDef) {
-  if (installed.value[s.id]) delete installed.value[s.id]
-  else installed.value[s.id] = true
+async function loadSkillData() {
+  skillsLoading.value = true
+  skillError.value = ''
+  try {
+    const [recommendedResult, installedResult] = await Promise.all([
+      listRecommendedSkills(),
+      listInstalledSkills(),
+    ])
+    recommended.value = recommendedResult.items
+    installedSkills.value = installedResult.items
+  } catch (error) {
+    skillError.value = (error as Error).message
+  } finally {
+    skillsLoading.value = false
+  }
 }
-function installAll(featured: SkillDef[]) { for (const s of featured) installed.value[s.id] = true }
+
+function openSkill() {
+  skillOpen.value = true
+  skillTab.value = 'recommended'
+  if (!recommended.value.length || !installedSkills.value.length) void loadSkillData()
+}
+
+async function install(skill: RecommendedSkill) {
+  installingId.value = skill.id
+  try {
+    await installRecommendedSkill(skill.id)
+    await loadSkillData()
+  } catch (error) {
+    skillError.value = `${skill.name}: ${(error as Error).message}`
+  } finally {
+    installingId.value = ''
+  }
+}
+
+async function installAllRecommendations() {
+  installingAll.value = true
+  const pending = recommended.value.filter(item => !item.installed)
+  for (const [index, skill] of pending.entries()) {
+    uploadProgress.value = `正在导入 ${index + 1}/${pending.length}：${skill.name}`
+    await install(skill)
+  }
+  installingAll.value = false
+  uploadProgress.value = pending.length ? '推荐技能导入完成' : '推荐技能均已安装'
+  setTimeout(() => { uploadProgress.value = '' }, 2400)
+}
+
+function uploadPickedFiles(event: Event) {
+  const input = event.target as HTMLInputElement
+  const selected = Array.from(input.files || [])
+  void submitUpload(selected)
+  input.value = ''
+}
+
+async function submitUpload(files: File[], sourceName?: string) {
+  if (!files.length) return
+  uploading.value = true
+  skillError.value = ''
+  uploadProgress.value = '正在解析技能包…'
+  const relativeFile = files[0] as File & { webkitRelativePath?: string }
+  const derivedSource = sourceName ||
+    relativeFile.webkitRelativePath?.split('/')[0] ||
+    files[0].name.replace(/\.(zip|tar|tgz|tar\.gz)$/i, '')
+  try {
+    const result = await uploadSkillFiles(files, derivedSource)
+    await loadSkillData()
+    skillTab.value = 'mine'
+    uploadProgress.value = `已导入 ${result.items.length} 个技能`
+    setTimeout(() => { uploadProgress.value = '' }, 2600)
+  } catch (error) {
+    skillError.value = (error as Error).message.replace(/^\d+\s*/, '')
+    uploadProgress.value = ''
+  } finally {
+    uploading.value = false
+  }
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault()
+  dragActive.value = false
+  void submitUpload(Array.from(event.dataTransfer?.files || []))
+}
+
+async function removeSkill(id: string) {
+  try {
+    await removeInstalledSkill(id)
+    await loadSkillData()
+  } catch (error) {
+    skillError.value = (error as Error).message
+  }
+}
+
+const categoryLabels: Record<string, string> = {
+  documents: '文档',
+  data: '数据',
+  engineering: '研发',
+  design: '设计',
+  agent: 'Agent',
+  custom: '自定义',
+}
+
+function formatSize(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(2)} MB`
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function sourceLabel(skill: InstalledSkill) {
+  if (skill.source_type === 'github') return 'GitHub'
+  if (skill.source_type === 'folder') return '文件夹'
+  if (skill.source_type === 'archive') return '压缩包'
+  return '本地上传'
+}
 </script>
 
 <template>
@@ -95,7 +216,7 @@ function installAll(featured: SkillDef[]) { for (const s of featured) installed.
       <n-button block @click="newChat" class="action-btn new-chat-btn">+ 新对话</n-button>
       <n-button block quaternary @click="gotoNotes" class="action-btn">知识库</n-button>
       <n-button block quaternary @click="openSearch" class="action-btn">搜索对话</n-button>
-      <n-button block quaternary @click="openSkill" class="action-btn">Skill</n-button>
+      <n-button block quaternary @click="openSkill" class="action-btn">技能</n-button>
     </div>
     <div class="chat-history-header">
       <span class="title">历史记录</span>
@@ -105,25 +226,35 @@ function installAll(featured: SkillDef[]) { for (const s of featured) installed.
         <n-spin size="small" />
         <n-text depth="3" style="font-size: 12px">加载中…</n-text>
       </div>
-      <n-empty v-else-if="sessions.items.length === 0" size="small" description="点击 + 新对话 开始" style="padding: 24px 0" />
-      <div
-        v-for="s in sessions.items"
-        :key="s.id"
-        @click="openSession(s.id)"
-        :class="['session-item', s.id === activeId ? 'active' : '']"
-      >
-        <div class="session-row">
-          <span class="session-title">{{ s.title }}</span>
-          <n-popconfirm @positive-click="removeSession(s.id, $event)">
-            <template #trigger>
-              <n-button text size="small" type="error" @click.stop class="delete-btn">✕</n-button>
-            </template>
-            删除该对话？
-          </n-popconfirm>
+      <template v-else-if="sessions.items.length > 0">
+        <button v-if="sessions.error" class="stale-retry" type="button" @click="retryInitialLoad">
+          已显示缓存 · 加载失败，点击重试
+        </button>
+        <div
+          v-for="s in sessions.items"
+          :key="s.id"
+          @click="openSession(s.id)"
+          :class="['session-item', s.id === activeId ? 'active' : '']"
+        >
+          <div class="session-row">
+            <span class="session-title">{{ s.title }}</span>
+            <n-popconfirm @positive-click="removeSession(s.id, $event)">
+              <template #trigger>
+                <n-button text size="small" type="error" @click.stop class="delete-btn">✕</n-button>
+              </template>
+              删除该对话？
+            </n-popconfirm>
+          </div>
+          <div v-if="s.preview" class="session-preview">{{ s.preview }}</div>
+          <div class="session-meta">{{ fmt(s.updated_at) }} · {{ s.message_count }} 条</div>
         </div>
-        <div v-if="s.preview" class="session-preview">{{ s.preview }}</div>
-        <div class="session-meta">{{ fmt(s.updated_at) }} · {{ s.message_count }} 条</div>
-      </div>
+      </template>
+      <n-empty v-else-if="sessions.error" size="small" description="历史记录加载失败" style="padding: 24px 0">
+        <template #extra>
+          <n-button size="small" @click="retryInitialLoad">重试</n-button>
+        </template>
+      </n-empty>
+      <n-empty v-else size="small" description="点击 + 新对话 开始" style="padding: 24px 0" />
     </div>
   </div>
   <!-- 搜索对话 -->
@@ -145,56 +276,93 @@ function installAll(featured: SkillDef[]) { for (const s of featured) installed.
   </n-modal>
 
   <!-- Skill 弹窗 -->
-  <n-modal v-model:show="skillOpen" preset="card" title="Skill 中心" style="max-width: 760px">
-    <n-space align="center" justify="space-between" style="margin-bottom: 12px">
-      <n-space>
-        <n-button :type="skillTab === 'featured' ? 'primary' : 'default'" size="small" @click="skillTab = 'featured'">推荐首页</n-button>
-        <n-button :type="skillTab === 'all' ? 'primary' : 'default'" size="small" @click="skillTab = 'all'">查看更多</n-button>
-        <n-button :type="skillTab === 'mine' ? 'primary' : 'default'" size="small" @click="skillTab = 'mine'">我的 Skill</n-button>
-      </n-space>
-      <n-button v-if="skillTab === 'featured'" size="small" type="primary" @click="installAll(featuredSkills)">一键导入推荐</n-button>
-    </n-space>
+  <n-modal v-model:show="skillOpen" preset="card" title="技能中心" style="max-width: 880px">
+    <div class="skill-center">
+      <div class="skill-topbar">
+        <div class="skill-tabs">
+          <button :class="{ active: skillTab === 'recommended' }" @click="skillTab = 'recommended'">推荐首页</button>
+          <button :class="{ active: skillTab === 'mine' }" @click="skillTab = 'mine'">我的技能</button>
+        </div>
+        <n-button
+          v-if="skillTab === 'recommended'"
+          size="small"
+          round
+          type="primary"
+          :loading="installingAll"
+          @click="installAllRecommendations"
+        >
+          一键导入推荐
+        </n-button>
+      </div>
 
-    <n-space v-if="skillTab === 'featured'" vertical size="medium">
-      <n-text depth="3" style="font-size: 12px">编辑精选 · 适合 HD 个人知识库使用场景</n-text>
-      <div class="skill-grid">
-        <div v-for="s in featuredSkills" :key="s.id" class="skill-card">
-          <div class="skill-head">
-            <div class="skill-emoji">{{ s.emoji }}</div>
-            <n-tag v-if="s.badge" size="tiny" :bordered="false" type="info">{{ s.badge }}</n-tag>
-          </div>
-          <div class="skill-name">{{ s.name }}</div>
-          <div class="skill-desc">{{ s.desc }}</div>
-          <div class="skill-actions">
-            <n-button size="tiny" type="primary" @click="toggleInstall(s)">{{ installed[s.id] ? '已导入' : '导入' }}</n-button>
+      <div v-if="skillsLoading" class="skill-state"><n-spin size="small" /><span>正在加载技能…</span></div>
+      <div v-else-if="skillError" class="skill-alert">{{ skillError }}</div>
+      <div v-if="uploadProgress" class="skill-success">{{ uploadProgress }}</div>
+
+      <template v-if="skillTab === 'recommended' && !skillsLoading">
+        <div class="skill-note">
+          <strong>来自 GitHub 的实用技能</strong>
+          <span>官方仓库 · anthropics/skills · 导入后保留完整包文件</span>
+        </div>
+        <div class="upload-panel" :class="{ active: dragActive }" @drop="onDrop" @dragover.prevent="dragActive = true" @dragleave="dragActive = false">
+          <input ref="fileInput" class="hidden-input" type="file" multiple accept=".zip,.tar,.tgz,.tar.gz" @change="uploadPickedFiles">
+          <input ref="folderInput" class="hidden-input" type="file" multiple webkitdirectory directory @change="uploadPickedFiles">
+          <strong>上传自己的技能</strong>
+          <p>支持包含 SKILL.md 的文件夹，或 ZIP / TAR / TAR.GZ 压缩包。</p>
+          <div class="upload-buttons">
+            <n-button size="small" round :disabled="uploading" @click="folderInput?.click()">选择文件夹</n-button>
+            <n-button size="small" round quaternary :disabled="uploading" @click="fileInput?.click()">选择压缩包</n-button>
           </div>
         </div>
-      </div>
-    </n-space>
 
-    <n-space v-else-if="skillTab === 'all'" vertical size="medium">
-      <n-text depth="3" style="font-size: 12px">浏览全部推荐 Skill</n-text>
-      <div class="skill-grid">
-        <div v-for="s in allSkills" :key="s.id" class="skill-card">
-          <div class="skill-head">
-            <div class="skill-emoji">{{ s.emoji }}</div>
-            <n-tag size="tiny" :bordered="false">{{ s.category }}</n-tag>
-          </div>
-          <div class="skill-name">{{ s.name }}</div>
-          <div class="skill-desc">{{ s.desc }}</div>
-          <div class="skill-actions">
-            <n-button size="tiny" type="primary" @click="toggleInstall(s)">{{ installed[s.id] ? '已导入' : '导入' }}</n-button>
-          </div>
+        <div class="skill-grid wide">
+          <article v-for="skill in recommended" :key="skill.id" class="skill-card">
+            <div class="skill-card-top">
+              <span class="skill-icon">{{ skill.emoji }}</span>
+              <n-tag size="tiny" round :bordered="false" type="info">{{ skill.badge || categoryLabels[skill.category] || skill.category }}</n-tag>
+            </div>
+            <h3>{{ skill.name }}</h3>
+            <p>{{ skill.description }}</p>
+            <div class="skill-footer">
+              <a :href="skill.source_url" target="_blank" rel="noreferrer">GitHub ↗</a>
+              <n-button
+                size="tiny"
+                round
+                :type="skill.installed ? 'default' : 'primary'"
+                :loading="installingId === skill.id"
+                :disabled="skill.installed"
+                @click="install(skill)"
+              >
+                {{ skill.installed ? '已安装' : '安装' }}
+              </n-button>
+            </div>
+          </article>
         </div>
-      </div>
-    </n-space>
+      </template>
 
-    <n-space v-else vertical size="small">
-      <n-empty v-if="Object.keys(installed).length === 0" description="还没有导入 Skill，去推荐首页看看" />
-      <div v-for="s in Object.keys(installed)" :key="s">
-        <n-text>{{ s }}</n-text>
-      </div>
-    </n-space>
+      <template v-else-if="!skillsLoading">
+        <n-empty v-if="installedSkills.length === 0" class="empty-spacing" description="还没有本地技能，可从推荐页一键导入" />
+        <div v-else class="owned-list">
+          <article v-for="skill in installedSkills" :key="skill.id" class="owned-item">
+            <div class="owned-main">
+              <div class="owned-title">
+                <strong>{{ skill.name }}</strong>
+                <n-tag size="tiny" round :bordered="false">{{ sourceLabel(skill) }}</n-tag>
+              </div>
+              <p v-if="skill.description">{{ skill.description }}</p>
+              <small>{{ skill.file_count }} 个文件 · {{ formatSize(skill.size_bytes) }} · {{ formatDate(skill.installed_at) }}</small>
+            </div>
+            <div class="owned-actions">
+              <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">来源</a>
+              <n-popconfirm @positive-click="removeSkill(skill.id)">
+                <template #trigger><button type="button">删除</button></template>
+                删除该技能？
+              </n-popconfirm>
+            </div>
+          </article>
+        </div>
+      </template>
+    </div>
   </n-modal>
 </template>
 
@@ -307,6 +475,18 @@ function installAll(featured: SkillDef[]) { for (const s of featured) installed.
   margin-top: 4px;
   color: var(--text-muted);
 }
+.stale-retry {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 6px;
+  background: rgba(248, 113, 113, 0.08);
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
 .search-item {
   padding: 10px 12px;
   border-radius: 8px;
@@ -318,12 +498,143 @@ function installAll(featured: SkillDef[]) { for (const s of featured) installed.
 .search-title { font-size: 13px; font-weight: 600; color: var(--text-primary) }
 .search-preview { font-size: 12px; opacity: 0.7; margin-top: 4px; color: var(--text-secondary) }
 .search-meta { font-size: 11px; opacity: 0.5; margin-top: 4px; color: var(--text-muted) }
-.skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px }
-.skill-card { padding: 14px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--bg-elevated); display: flex; flex-direction: column; gap: 8px }
-.skill-card:hover { border-color: var(--accent, #3b82f6) }
-.skill-head { display: flex; align-items: center; justify-content: space-between }
-.skill-emoji { font-size: 22px }
-.skill-name { font-size: 14px; font-weight: 600 }
-.skill-desc { font-size: 12px; opacity: 0.75; min-height: 36px; color: var(--text-secondary) }
-.skill-actions { display: flex; justify-content: flex-end }
+.skill-center { min-height: 420px }
+.skill-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.skill-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--hover-bg);
+}
+.skill-tabs button {
+  height: 30px;
+  min-width: 88px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.skill-tabs button.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.skill-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.skill-note strong { font-size: 14px; }
+.skill-note span { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-panel {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px;
+  border: 1.5px dashed rgba(59, 130, 246, .35);
+  border-radius: 13px;
+  background: rgba(59, 130, 246, .06);
+  transition: all .2s ease;
+}
+.upload-panel.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, .11);
+}
+.upload-panel strong { font-size: 14px; }
+.upload-panel p { margin: 0; color: var(--text-muted); font-size: 12px; text-align: center; }
+.upload-buttons { display: flex; gap: 8px; margin-top: 5px; }
+.hidden-input { display: none; }
+.skill-state,
+.skill-success,
+.skill-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.skill-state { justify-content: center; background: var(--hover-bg); color: var(--text-muted); }
+.skill-success { justify-content: center; background: rgba(34, 197, 94, .1); color: #16a34a; }
+.skill-alert { background: rgba(239, 68, 68, .08); color: #dc2626; word-break: break-word; }
+.skill-grid.wide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.skill-card {
+  padding: 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: 15px;
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .05);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.skill-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(59, 130, 246, .4);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .09);
+}
+.skill-card-top { display: flex; align-items: center; justify-content: space-between; }
+.skill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: rgba(59, 130, 246, .1);
+  font-size: 20px;
+}
+.skill-card h3 { margin: 13px 0 5px; font-size: 15px; line-height: 1.25; }
+.skill-card p {
+  min-height: 54px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.skill-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.skill-footer a { color: var(--text-muted); font-size: 12px; text-decoration: none; }
+.skill-footer a:hover { color: #3b82f6; }
+.owned-list { border-top: 1px solid var(--border-soft); }
+.owned-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.owned-item:last-child { border-bottom: 0; }
+.owned-main { min-width: 0; }
+.owned-title { display: flex; align-items: center; gap: 8px; }
+.owned-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.owned-main p {
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.owned-main small { color: var(--text-muted); font-size: 11px; }
+.owned-actions { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+.owned-actions a { color: var(--text-secondary); font-size: 12px; text-decoration: none; }
+.owned-actions a:hover { color: #3b82f6; }
+.owned-actions button { border: 0; padding: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 12px; }
+.owned-actions button:hover { color: #ef4444; }
+.empty-spacing { margin-top: 52px; }
+@media (max-width: 820px) {
+  .skill-grid.wide { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .skill-topbar { align-items: stretch; flex-direction: column; }
+  .skill-grid.wide { grid-template-columns: 1fr; }
+  .owned-item { align-items: stretch; flex-direction: column; gap: 8px; }
+}
 </style>

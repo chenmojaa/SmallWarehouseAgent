@@ -8,14 +8,33 @@ interface State {
   currentDetail: SessionDetail | null
 }
 
+const SESSIONS_CACHE_KEY = 'hd_sessions_cache_v1'
+
+function readSessionsCache(): Session[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_CACHE_KEY)
+    const value = raw ? JSON.parse(raw) : null
+    return Array.isArray(value) ? value as Session[] : []
+  } catch {
+    return []
+  }
+}
+
 export const useSessionsStore = defineStore("sessions", {
   state: (): State => ({ items: [], loading: false, error: null, currentDetail: null }),
   actions: {
     async load() {
       this.loading = true
       this.error = null
-      try { this.items = await listSessions() }
-      catch (e) { this.error = (e as Error).message }
+      try {
+        this.items = await listSessions()
+        localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(this.items))
+      }
+      catch (e) {
+        this.error = (e as Error).message
+        const cached = readSessionsCache()
+        if (cached.length > 0) this.items = cached
+      }
       finally { this.loading = false }
     },
     async createNew(title?: string) {
@@ -39,6 +58,7 @@ export const useSessionsStore = defineStore("sessions", {
     },
     async loadDetail(id: string) {
       this.loading = true
+      this.currentDetail = null
       try {
         this.currentDetail = await getSessionDetail(id)
       } catch (e) {

@@ -8,7 +8,7 @@ const models = useModelsStore()
 const router = useRouter()
 
 const DEBUG = import.meta.env.DEV
-function dbg(...args) { if (DEBUG) console.debug("[ModelSelector]", ...args) }
+function dbg(...args: unknown[]) { if (DEBUG) console.debug("[ModelSelector]", ...args) }
 
 const REASONING_OPTIONS = [
   { label: '低', value: 'low' as ReasoningLevel },

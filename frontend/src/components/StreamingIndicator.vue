@@ -85,8 +85,8 @@ function switchTo() {
         <span class="dot"></span>
       </div>
       <div class="indicator-content">
-        <div class="indicator-title">{{ targetSession?.title || '\u672a\u547d\u540d\u4f1a\u8bdd' }}</div>
-        <div class="indicator-status">{{ label }}\uff08{{ elapsed }}s\uff09\u00b7\u70b9\u51fb\u5207\u56de\u53bb</div>
+        <div class="indicator-title">{{ targetSession?.title || '未命名会话' }}</div>
+        <div class="indicator-status">{{ label }}（{{ elapsed }}s）· 点击切回去</div>
       </div>
     </div>
   </Transition>

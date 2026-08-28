@@ -35,6 +35,10 @@ frontend/dist/
 frontend/.vite/
 frontend/.cache/
 frontend/.parcel-cache/
+frontend/tsconfig.tsbuildinfo
+frontend/tsconfig.*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*

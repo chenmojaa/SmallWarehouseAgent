@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.feishu_sync import sync_all, sync_space
 from app.tools.feishu_client import FeishuClient, FeishuError
+from app.storage.feishu_config_store import get_config, update_config
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class SyncResponse(BaseModel):
     space_id: str
     space_name: str
     synced: int
+    updated: int
     skipped: int
     failed: int
     errors: list[str] = []
@@ -39,6 +41,22 @@ def feishu_status():
         "space_ids": [s for s in (settings.feishu_space_ids or "").split(",") if s],
         "sync_interval_min": settings.feishu_sync_interval_min,
     }
+
+
+class FeishuConfigRequest(BaseModel):
+    web_url: str = ""
+
+
+@router.get("/config")
+def feishu_config():
+    """Get UI-configurable Feishu settings."""
+    return get_config()
+
+
+@router.post("/config")
+def feishu_config_update(body: FeishuConfigRequest):
+    """Update UI-configurable Feishu settings (currently only web_url)."""
+    return update_config({"web_url": body.web_url})
 
 
 @router.get("/spaces")
@@ -67,7 +85,6 @@ def list_spaces():
         client.close()
 
 
-@router.post("/sync", response_model=SyncAllResponse)
 class SyncRequest(BaseModel):
     space_id: str | None = None
     force_full: bool = False
@@ -94,6 +111,7 @@ def sync_now(body: SyncRequest | None = None):
                 space_id=r.space_id,
                 space_name=r.space_name,
                 synced=r.synced,
+                updated=r.updated,
                 skipped=r.skipped,
                 failed=r.failed,
                 errors=r.errors,

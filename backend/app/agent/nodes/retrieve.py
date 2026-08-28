@@ -35,8 +35,9 @@ def retrieve_node(state: AgentState) -> dict:
 
   api_key = state.get("api_key_override")
   base_url = state.get("base_url_override")
+  emb_model = state.get("embedding_model_override")
   try:
-    chunks = hybrid_search(query, top_k=5, api_key=api_key, base_url=base_url)
+    chunks = hybrid_search(query, top_k=5, api_key=api_key, base_url=base_url, model=emb_model)
   except Exception:
     chunks = []
   return {

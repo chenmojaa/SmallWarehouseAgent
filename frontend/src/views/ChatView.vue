@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
@@ -19,19 +19,6 @@ const route = useRoute()
 
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
-
-// Drives the inline ThinkingIndicator. Two cases when the indicator
-// should appear:
-//   1. The last message is an empty assistant placeholder (the ghost-asst
-//      that send() pushes before the first delta arrives), OR
-//   2. We are mid-<think> even though the visible body has content (so the
-//      user understands content is stalled because the model is reasoning).
-const thinkingVisible = computed(() => {
-  if (!chat.isStreaming) return false
-  const last = chat.messages[chat.messages.length - 1]
-  if (!last || last.role !== 'assistant') return false
-  return !last.content.trim() || chat.thinking
-})
 
 async function loadByRoute() {
   const id = route.params.id as string | undefined
@@ -69,6 +56,10 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <template>
+  <div v-if="chat.error && !chat.isStreaming" class="load-error">
+    <span>{{ chat.error }}</span>
+    <n-button size="tiny" quaternary @click="loadByRoute">重试</n-button>
+  </div>
   <!-- 空对话时：用 welcome 布局把问候语 + 输入框一起垂直居中上半屏 -->
   <div v-if="chat.messages.length === 0" class="welcome-layout">
     <div class="welcome">
@@ -115,12 +106,16 @@ function onKey(e: KeyboardEvent) {
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" class="msg-row">
           <MessageBubble
-            v-if="!(chat.isStreaming && m.role === 'assistant' && (!m.content.trim() || chat.thinking))"
+            v-if="!(chat.streamingHere && m.id === chat.streamingMessageId && (!m.content.trim() || chat.thinking))"
             :role="m.role"
             :content="m.content"
             :citations="m.citations"
             :active-index="m.activeCitationIndex ?? null"
             @update:active-index="(n: number) => chat.setActiveCitation(m.id, n <= 0 ? null : n)"
+          />
+          <ThinkingIndicator
+            v-else-if="chat.streamingHere && m.id === chat.streamingMessageId"
+            :show="true"
           />
           <CitationPreview
             v-if="m.role === 'assistant' && m.citations && m.citations.length > 0 && m.activeCitationIndex != null && m.activeCitationIndex >= 1 && m.citations[m.activeCitationIndex - 1]"
@@ -137,11 +132,6 @@ function onKey(e: KeyboardEvent) {
             <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
           </div>
         </div>
-        <!-- Standalone thinking indicator. Shows only when the last
-             message is an empty assistant placeholder OR we are mid-<think>.
-             When the asst starts streaming real text and we are not in
-             <think>, MessageBubble takes over and this hides itself. -->
-        <ThinkingIndicator :show="thinkingVisible" />
       </div>
     </div>
 
@@ -359,9 +349,20 @@ function onKey(e: KeyboardEvent) {
   opacity: 0.65;
 }
 .hint-icon { font-size: 13px; }
+.load-error {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 32px));
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  font-size: 12px;
+}
 </style>
-          <!-- Use chat.isStreaming (not chat.streamingHere) so the ghost-asst
-               is also masked during the welcome -> new-session window where
-               streamingSessionId hasn't been bound yet (that was the bug). -->
-          <MessageBubble
-            v-if="!(chat.isStreaming && m.role === 'assistant' && (!m.content.trim() || chat.thinking))"

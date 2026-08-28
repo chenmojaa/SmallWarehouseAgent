@@ -19,9 +19,21 @@ function authHeaders(): Record<string, string> {
 }
 
 export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(BASE + path, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(res.status + " " + (await res.text()))
-  return res.json() as Promise<T>
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, attempt * 700))
+    let res: Response
+    try {
+      res = await fetch(BASE + path, { headers: { ...authHeaders() } })
+    } catch (error) {
+      lastError = error
+      continue
+    }
+    if (res.ok) return res.json() as Promise<T>
+    lastError = new Error(res.status + " " + (await res.text()))
+    if (res.status < 500) break
+  }
+  throw lastError
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {

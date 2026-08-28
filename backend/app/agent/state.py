@@ -22,6 +22,7 @@ class AgentState(TypedDict, total=False):
 
   # ---- retrieval results ----
   retrieved_chunks: list
+  skip_retrieval: bool              # fast-path: skip retrieve node for greetings
   research_iterations: int          # how many rounds research agent ran
   research_notes: list              # intermediate follow-up queries produced during research
 
@@ -41,4 +42,5 @@ class AgentState(TypedDict, total=False):
   base_url_override: str | None
   api_key_override: str | None
   reasoning_level_override: str | None
+  embedding_model_override: str | None
   step_count: int

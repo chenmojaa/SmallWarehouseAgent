@@ -204,7 +204,7 @@ onBeforeUnmount(() => {
 <template>
   <div :class="['bubble-row', role]">
     <div :class="['bubble', role]">
-      <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section" open>
+      <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section">
         <summary>思考过程</summary>
         <div class="think-body">{{ think }}</div>
       </details>

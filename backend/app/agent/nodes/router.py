@@ -13,6 +13,8 @@ Design (per OPTIMIZATION.md section 2.5):
 from __future__ import annotations
 
 import logging
+import json
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -24,6 +26,23 @@ from app.llm.factory import _build_model
 _log = logging.getLogger(__name__)
 
 Intent = Literal["chat", "research", "ingest", "report"]
+
+# Fast-path patterns: skip the router LLM call for obvious greetings / small talk
+# so the user gets an instant response instead of waiting 12+ seconds.
+_FAST_CHAT_PATTERNS = re.compile(
+    r"^(你好|hi|hello|嗨|喂|在吗|在么|早啊|早|早上好|下午好|晚上好|晚安"
+    r"|谢谢|多谢|感谢|thanks|thank you|thx"
+    r"|再见|拜拜|bye|goodbye|回头见|回见"
+    r"|你是谁|你是谁？|你叫什么|介绍一下自己|你能做什么|你有什么功能|what can you do|who are you"
+    r"|你是谁\?|你是谁？"
+    r")[!！。.…~～\s]*$",
+    re.IGNORECASE
+)
+
+
+def _is_fast_chat(query: str) -> bool:
+    """Return True if the query is a simple greeting / small talk that can skip the router."""
+    return bool(_FAST_CHAT_PATTERNS.match(query.strip())) if query else False
 
 ROUTER_PROMPT = """You are HD knowledge base task router. Read the conversation history and the latest message, and output exactly one JSON object with NO other text:
 
@@ -66,10 +85,37 @@ def _recent_history(messages, limit: int = 3) -> list[dict]:
     return out
 
 
+def _response_text(response) -> str:
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+    return str(content or "")
+
+
+def _parse_router_json(text: str) -> RouterDecision:
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        raise ValueError("no JSON object in router response")
+    return RouterDecision.model_validate_json(match.group(0))
+
+
 def router_node(state: AgentState) -> dict:
     """Classify intent + rewrite query. NEVER raises; always returns a usable state."""
     query = (state.get("query") or "").strip()
     messages = state.get("messages") or []
+
+    # Fast path: simple greetings / small talk skip the router LLM entirely.
+    if _is_fast_chat(query):
+        _log.info("router: fast-path chat (greeting detected)")
+        return {
+            "intent": "chat",
+            "rewritten_query": query,
+            "skip_retrieval": True,
+            "step_count": state.get("step_count", 0) + 1,
+        }
 
     # Router disabled -> chat with verbatim query.
     if not settings.router_enabled:
@@ -98,10 +144,10 @@ def router_node(state: AgentState) -> dict:
     user_payload = "%s\n\nHistory:\n%s\n\nInput: %s\n\nOutput JSON:" % (ROUTER_PROMPT, history_str, query)
 
     try:
-        structured = chat.with_structured_output(RouterDecision)
-        decision: RouterDecision = structured.invoke(user_payload)
+        response = chat.invoke(user_payload)
+        decision = _parse_router_json(_response_text(response))
     except Exception as e:
-        _log.warning("router: structured output failed, falling back to chat: %s", e)
+        _log.warning("router: JSON routing failed, falling back to chat: %s", e)
         return {"intent": "chat", "rewritten_query": query,
                 "step_count": state.get("step_count", 0) + 1}
 
@@ -116,6 +162,8 @@ def router_node(state: AgentState) -> dict:
 def route_by_intent(state: AgentState) -> str:
     """Conditional edge dispatcher. Used by LangGraph after the router."""
     intent = (state.get("intent") or "chat").lower()
+    if state.get("skip_retrieval"):
+        return "chat_no_rag"
     if intent in ("research", "ingest", "report"):
         return intent
     return "chat"

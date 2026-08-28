@@ -31,6 +31,22 @@ class IngestTextRequest(BaseModel):
 
 
 def _to_dict(note: Note) -> dict:
+  import re
+  from app.storage.feishu_config_store import get_web_url
+
+  view_url = None
+  if note.source_type.startswith("feishu_") and note.source_url:
+    web_base = get_web_url()
+    if web_base:
+      m = re.match(r"feishu://(\w+)/(\w+)/(\w+)", note.source_url)
+      if m:
+        scheme, space_id, token = m.group(1), m.group(2), m.group(3)
+        web_base = web_base.rstrip("/")
+        if scheme == "wiki":
+          view_url = f"{web_base}/wiki/{token}"
+        elif scheme == "bitable":
+          view_url = f"{web_base}/base/{space_id}?table={token}"
+
   return {
     "id": note.id,
     "title": note.title,
@@ -43,6 +59,7 @@ def _to_dict(note: Note) -> dict:
     "chunk_count": note.chunk_count,
     "embedded": note.embedded,
     "created_at": note.created_at.isoformat() if note.created_at else None,
+    "view_url": view_url,
   }
 
 
