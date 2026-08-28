@@ -40,7 +40,10 @@ logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = int(os.environ.get("HD_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
 _ALLOWED_ORIGINS = [
   o.strip() for o in os.environ.get("HD_ALLOWED_ORIGINS", "").split(",") if o.strip()
-] or ["http://127.0.0.1:5174", "http://localhost:5174"]
+] or [
+  "http://127.0.0.1:5174", "http://localhost:5174",
+  "https://11gv92qt74799.vicp.fun",
+]
 
 app = FastAPI(
   title="HEAR Agent",
@@ -77,6 +80,30 @@ app.include_router(custom_models_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
 
+# ---- Serve frontend static files (for 花生壳 / production) ----
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _FRONTEND_DIST.is_dir():
+  from fastapi.staticfiles import StaticFiles
+  app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")
+  # Favicon & other root-level static files
+  for _f in _FRONTEND_DIST.glob("*"):
+    if _f.is_file():
+      _name = _f.name
+      app.mount(f"/{_name}", StaticFiles(directory=str(_FRONTEND_DIST)), name=f"static_{_name}")
+
+  @app.get("/{_:path}")
+  async def _spa_fallback(_: str):
+    """Serve index.html for SPA client-side routing. Non-API GET requests fall here."""
+    from fastapi.responses import FileResponse
+    return FileResponse(_FRONTEND_DIST / "index.html")
+
+  @app.get("/")
+  async def _root():
+    from fastapi.responses import FileResponse
+    return FileResponse(_FRONTEND_DIST / "index.html")
+
+  logger.info(f"Frontend static files mounted from {_FRONTEND_DIST}")
+
 
 @app.on_event("startup")
 async def _startup():
@@ -103,24 +130,29 @@ async def _startup():
     logger.info(f"OCR check failed: {e}")
 
   # ---- Feishu background sync ----
-  if settings.feishu_enabled and settings.feishu_sync_interval_min > 0:
+  # The loop always starts and re-checks the runtime config each tick, so a user
+  # who fills in the Feishu settings form after boot gets syncing without a
+  # restart. When not configured/enabled the tick is a cheap no-op.
+  if settings.feishu_sync_interval_min > 0:
     import asyncio
     from app.feishu_sync import sync_all
+    from app.storage import feishu_config_store as _fcs
     interval_s = max(60, settings.feishu_sync_interval_min * 60)
     async def _feishu_loop():
-      logger.info(f"Feishu background sync enabled, interval={interval_s}s")
+      logger.info(f"Feishu background sync loop started, interval={interval_s}s")
       while True:
         try:
-          results = await asyncio.to_thread(sync_all)
-          for r in results:
-            logger.info(
-              f"Feishu sync [{r.space_name}]: synced={r.synced} skipped={r.skipped} failed={r.failed}"
-            )
+          if _fcs.is_enabled():
+            results = await asyncio.to_thread(sync_all)
+            for r in results:
+              logger.info(
+                f"Feishu sync [{r.space_name}]: synced={r.synced} skipped={r.skipped} failed={r.failed}"
+              )
         except Exception as e:
           logger.warning(f"Feishu background sync failed: {type(e).__name__}: {e}")
         await asyncio.sleep(interval_s)
     asyncio.create_task(_feishu_loop())
-  elif settings.feishu_enabled:
-    logger.info("Feishu enabled but FEISHU_SYNC_INTERVAL_MIN=0 (manual sync only)")
+  else:
+    logger.info("Feishu sync interval=0 (manual sync only)")
 
   logger.info("=" * 50)

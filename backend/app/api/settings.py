@@ -4,8 +4,35 @@ from pydantic import BaseModel, Field
 import httpx
 
 from app.llm.factory import list_providers
+from app.storage import llm_config_store as _lcs
 
 router = APIRouter(tags=["settings"])
+
+
+class LlmConfigRequest(BaseModel):
+  api_key: str | None = None
+  base_url: str | None = None
+
+
+@router.get("/settings/llm-config")
+def get_llm_config():
+  """Return the server-side stored LLM config (key masked)."""
+  return _lcs.get_config()
+
+
+@router.post("/settings/llm-config")
+def set_llm_config(body: LlmConfigRequest):
+  """Persist the user's API key/base_url server-side.
+
+  Needed so background jobs (Feishu auto-sync re-vectorization) can embed
+  without a live request carrying the X-API-Key header.
+  """
+  patch = {}
+  if body.api_key:
+    patch["api_key"] = body.api_key
+  if body.base_url is not None:
+    patch["base_url"] = body.base_url
+  return _lcs.update_config(patch)
 
 
 @router.get("/settings/models")

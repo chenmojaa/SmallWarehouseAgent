@@ -72,45 +72,64 @@ def _node_revision(node: dict) -> str | None:
 def _drop_and_reingest(existing: Note, new_title: str, new_content: str,
                        source_type: str, revision: str | None,
                        api_key, base_url, embedding_model) -> Note:
-    """Replace a note's content + chunks while preserving its id."""
+    """Replace a note's content + chunks while preserving its id.
+
+    Ordering matters: we embed the NEW chunks FIRST. Only if embedding succeeds
+    do we drop the old vectors and add the new ones. If embedding fails (e.g. no
+    API key available to a background run), we keep the OLD vectors intact and do
+    NOT advance the stored revision, so the next sync cycle retries the update
+    instead of leaving the note permanently un-indexed.
+    """
     note_id = existing.id
-    # 1. Drop existing chunks (Chroma + FTS5)
+
+    # 1. Re-chunk + embed the new content BEFORE touching the old index.
+    chunks = chunk_text(new_content)
+    embeddings = None
+    if chunks:
+        try:
+            from app.embeddings.factory import embed_texts as _embed
+            embeddings = _embed(chunks, api_key=api_key, base_url=base_url, model=embedding_model)
+        except Exception as e:
+            _log.warning("feishu sync: re-embed failed (keeping old vectors, will retry): %s", e)
+            embeddings = None
+
+    if chunks and embeddings is None:
+        # Embedding failed: refresh on-disk text + title but keep old vectors and
+        # old revision so the next cycle retries.
+        _write_content(existing, new_content)
+        engine = get_engine()
+        with SqlSession(engine) as s:
+            stmt = select(Note).where(Note.id == note_id)
+            n = s.exec(stmt).first()
+            if not n:
+                return existing
+            n.title = new_title[:500]
+            n.word_count = len(new_content)
+            n.source_type = source_type
+            n.embedded = False
+            s.add(n)
+            s.commit()
+            s.refresh(n)
+            return n
+
+    # 2. Embedding succeeded: drop old chunks (Chroma + FTS5) then add new.
     try:
         delete_note_chunks(note_id)
     except Exception as e:
         _log.warning("feishu sync: delete_note_chunks(%s) failed: %s", note_id, e)
-    # 2. Overwrite on-disk markdown
-    try:
-        if existing.content_path and os.path.exists(existing.content_path):
-            with open(existing.content_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-        else:
-            # Content path was lost; fall back to creating a new file path.
-            new_path = os.path.join(settings.notes_dir, note_id + ".md")
-            os.makedirs(settings.notes_dir, exist_ok=True)
-            with open(new_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-    except Exception as e:
-        _log.warning("feishu sync: content write failed: %s", e)
+    _write_content(existing, new_content)
 
-    # 3. Re-chunk + embed + add chunks (back to Chroma + FTS5)
-    chunks = chunk_text(new_content)
-    try:
-        if chunks:
-            from app.embeddings.factory import embed_texts as _embed
-            embeddings = _embed(chunks, api_key=api_key, base_url=base_url, model=embedding_model)
+    n_chunks = 0
+    embedded = False
+    if chunks and embeddings:
+        try:
             from app.storage.vector import add_chunks
             n_chunks = add_chunks(note_id, chunks, embeddings)
             embedded = True
-        else:
-            n_chunks = 0
-            embedded = False
-    except Exception as e:
-        _log.warning("feishu sync: re-embed failed: %s", e)
-        n_chunks = 0
-        embedded = False
+        except Exception as e:
+            _log.warning("feishu sync: add_chunks failed: %s", e)
 
-    # 4. Update Note row
+    # 3. Update Note row + advance revision (only reached when embed succeeded).
     engine = get_engine()
     with SqlSession(engine) as s:
         stmt = select(Note).where(Note.id == note_id)
@@ -127,6 +146,21 @@ def _drop_and_reingest(existing: Note, new_title: str, new_content: str,
         s.commit()
         s.refresh(n)
         return n
+
+
+def _write_content(existing: Note, new_content: str) -> None:
+    """Overwrite the on-disk markdown for a note (creates the file if lost)."""
+    try:
+        if existing.content_path and os.path.exists(existing.content_path):
+            with open(existing.content_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+        else:
+            new_path = os.path.join(settings.notes_dir, existing.id + ".md")
+            os.makedirs(settings.notes_dir, exist_ok=True)
+            with open(new_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+    except Exception as e:
+        _log.warning("feishu sync: content write failed: %s", e)
 
 
 def _sync_docx_node(client: FeishuClient, space_id: str, node: dict,
@@ -283,8 +317,9 @@ def sync_space(space_id: str, client: FeishuClient | None = None,
 def sync_all(api_key: str | None = None, base_url: str | None = None,
              embedding_model: str | None = None,
              force_full: bool = False) -> list[SyncResult]:
-    """Sync every space listed in settings.feishu_space_ids (or all visible)."""
-    configured = [s.strip() for s in (settings.feishu_space_ids or "").split(",") if s.strip()]
+    """Sync every space listed in the configured space_ids (or all visible)."""
+    from app.storage import feishu_config_store as _fcs
+    configured = _fcs.get_space_ids()
     client = FeishuClient()
     try:
         spaces = client.list_spaces()

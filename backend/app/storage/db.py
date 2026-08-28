@@ -45,6 +45,13 @@ class ChatMessage(SQLModel, table=True):
   created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class UserProfile(SQLModel, table=True):
+  """Long-term user profile (§6.5): cross-session facts/preferences as JSON."""
+  __tablename__ = "user_profiles"
+  user_id: str = Field(primary_key=True)
+  facts_json: str = "{}"
+  updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 _engine = None
 
 
@@ -383,3 +390,30 @@ def update_message_citations(message_id: int, citations: list) -> None:
       msg.citations_json = json.dumps(citations, ensure_ascii=False)
       s.add(msg)
       s.commit()
+
+
+# === Long-term user profile (§6.5) ===
+def get_profile(user_id: str) -> dict:
+  """Return the stored profile facts for a user ({} when absent)."""
+  with get_session() as s:
+    row = s.get(UserProfile, user_id)
+    if not row:
+      return {}
+    try:
+      return json.loads(row.facts_json)
+    except Exception:
+      return {}
+
+
+def save_profile(user_id: str, facts: dict) -> None:
+  """Upsert the profile facts for a user."""
+  with get_session() as s:
+    row = s.get(UserProfile, user_id)
+    payload = json.dumps(facts, ensure_ascii=False)
+    if row:
+      row.facts_json = payload
+      row.updated_at = datetime.now(timezone.utc)
+      s.add(row)
+    else:
+      s.add(UserProfile(user_id=user_id, facts_json=payload))
+    s.commit()

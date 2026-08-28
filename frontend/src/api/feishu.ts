@@ -48,15 +48,37 @@ export function syncFeishu(spaceId?: string | null): Promise<FeishuSyncResponse>
 
 export interface FeishuConfig {
   web_url: string
-  enabled: boolean
+  app_id: string
+  app_secret_set: boolean
+  app_secret_masked: string
   api_base: string
+  space_ids: string[]
+  enabled: boolean
+  configured: boolean
   sync_interval_min: number
+}
+
+export interface FeishuConfigPatch {
+  web_url?: string
+  app_id?: string
+  app_secret?: string
+  api_base?: string
+  space_ids?: string
+}
+
+export interface FeishuTestResult {
+  ok: boolean
+  spaces: { space_id: string; name?: string }[]
 }
 
 export function getFeishuConfig(): Promise<FeishuConfig> {
   return get<FeishuConfig>("/feishu/config")
 }
 
-export function updateFeishuConfig(web_url: string): Promise<FeishuConfig> {
-  return postJson<FeishuConfig>("/feishu/config", { web_url })
+export function updateFeishuConfig(patch: FeishuConfigPatch): Promise<FeishuConfig> {
+  return postJson<FeishuConfig>("/feishu/config", patch)
+}
+
+export function testFeishuConnection(): Promise<FeishuTestResult> {
+  return postJson<FeishuTestResult>("/feishu/test", {})
 }

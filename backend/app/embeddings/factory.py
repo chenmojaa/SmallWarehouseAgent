@@ -14,8 +14,12 @@ OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
 def _resolve_url(base_url):
   if base_url:
     return base_url.rstrip("/") + "/embeddings"
+  # Background jobs (Feishu auto-sync) pass no base_url; fall back to the
+  # user-saved server-side value, then env vars.
+  from app.storage import llm_config_store as _lcs
   fallback = (
     (settings.embedding_api_base or "").strip()
+    or _lcs.get_base_url()
     or (settings.llm_api_base or "").strip()
     or OPENAI_DEFAULT_BASE
   )
@@ -23,7 +27,10 @@ def _resolve_url(base_url):
 
 
 def _resolve_key(api_key):
-  return (api_key or settings.embedding_api_key or settings.llm_api_key or "").strip()
+  # Request-provided key wins; then env; then the server-side stored key so
+  # background re-vectorization (no request context) still has credentials.
+  from app.storage import llm_config_store as _lcs
+  return (api_key or settings.embedding_api_key or settings.llm_api_key or _lcs.get_api_key() or "").strip()
 
 
 def _resolve_model(model):

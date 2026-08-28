@@ -1,19 +1,21 @@
 """LangGraph state schema for the HEAR agent."""
 from __future__ import annotations
 
-import operator
-from typing import Annotated, TypedDict
+from typing import TypedDict
 
 
 class AgentState(TypedDict, total=False):
   # ---- conversation ----
-  # Phase 3.1: Annotated[list, operator.add] makes LangGraph concatenate per-node
-  # message deltas instead of replacing the whole list. Without this annotation
-  # a node returning {"messages": [m]} would clobber history; with it the same
-  # node appends m to the existing list. Required for the checkpointer-driven
-  # cross-call accumulation planned for Phase 3.5.
-  messages: Annotated[list, operator.add]
+  # Replace semantics (no reducer): chat.py seeds the full history from the DB
+  # on every call (server is the source of truth), so the input must overwrite
+  # whatever the checkpointer stored. With an operator.add reducer the seeded
+  # history would be appended to the checkpointed copy and duplicate every turn.
+  messages: list
   session_id: str
+
+  # ---- long-term memory (§6.5) ----
+  profile: dict                     # user profile facts, injected by chat.py
+  summary: str                      # compressed summary of history outside the window
 
   # ---- current request ----
   query: str

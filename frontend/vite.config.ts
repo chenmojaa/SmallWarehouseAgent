@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     .filter(Boolean)
   const allowedHosts = allowedFromEnv.length
     ? allowedFromEnv
-    : ['localhost', '127.0.0.1']
+    : ['localhost', '127.0.0.1', '11gv92qt74799.vicp.fun']
 
   return {
     plugins: [vue()],
@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts,
       proxy: {
         '/api': {
-          target: env.VITE_API_TARGET || 'http://127.0.0.1:8001',
+          target: env.VITE_API_TARGET || 'http://127.0.0.1:5006',
           changeOrigin: true,
           proxyTimeout: 600000,
           timeout: 600000,

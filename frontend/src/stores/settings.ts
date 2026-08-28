@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { listModels, type ModelsInfo } from '@/api/settings'
+import { listModels, saveLlmConfig, type ModelsInfo } from '@/api/settings'
 import { getApiKey, setApiKey as saveApiKey } from '@/api/client'
 
 type Theme = 'dark' | 'light'
@@ -48,6 +48,12 @@ export const useSettingsStore = defineStore('settings', {
       this.apiKey = k ? maskKey(k) : ''
       this.theme = loadTheme()
       applyTheme(this.theme)
+      // Best-effort: mirror an existing local key to the server so background
+      // jobs (Feishu auto re-vectorization) have credentials without the user
+      // re-saving. Never blocks UI.
+      if (k) {
+        saveLlmConfig({ api_key: k }).catch(() => {})
+      }
     },
     async fetch() {
       this.loading = true
@@ -67,6 +73,8 @@ export const useSettingsStore = defineStore('settings', {
       const trimmed = k.trim()
       this.apiKeySet = !!trimmed
       this.apiKey = maskKey(trimmed)
+      // Mirror to the server so background jobs can embed.
+      if (trimmed) saveLlmConfig({ api_key: trimmed }).catch(() => {})
     },
     clearApiKey() {
       saveApiKey('')

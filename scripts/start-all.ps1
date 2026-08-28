@@ -1,19 +1,19 @@
-# start-all.ps1 -- boot backend + vite, tail logs. Local-only (no public tunnel).
+# start-all.ps1 -- boot backend + vite, tail logs. Supports 花生壳 HTTPS mapping.
 # Run from a normal PowerShell.
 
 $ErrorActionPreference = 'SilentlyContinue'
 Set-Location D:\one_agent
 
-Write-Host '== Stop any stale processes on 5174 / 8001 ==' -Foreground Cyan
+Write-Host '== Stop any stale processes on 5174 / 5006 ==' -Foreground Cyan
 Get-NetTCPConnection -LocalPort 5174 -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Force -Id $_.OwningProcess -ErrorAction SilentlyContinue }
-Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -LocalPort 5006 -ErrorAction SilentlyContinue |
   ForEach-Object { Stop-Process -Force -Id $_.OwningProcess -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
 
-Write-Host '== Boot backend (FastAPI on 127.0.0.1:8001) ==' -Foreground Cyan
+Write-Host '== Boot backend (FastAPI on 0.0.0.0:5006) ==' -Foreground Cyan
 Start-Process -FilePath 'D:\one_agent\backend\.venv\Scripts\python.exe' `
-  -ArgumentList '-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8001' `
+  -ArgumentList '-m','uvicorn','app.main:app','--host','0.0.0.0','--port','5006' `
   -WorkingDirectory 'D:\one_agent\backend' `
   -RedirectStandardOutput 'D:\one_agent\backend\uvicorn.out.log' `
   -RedirectStandardError  'D:\one_agent\backend\uvicorn.err.log' `
@@ -23,7 +23,7 @@ Write-Host '== Wait for backend ==' -Foreground Cyan
 $backendReady = $false
 for ($i = 0; $i -lt 30; $i++) {
   try {
-    $response = Invoke-WebRequest 'http://127.0.0.1:8001/api/health' -UseBasicParsing -TimeoutSec 1
+    $response = Invoke-WebRequest 'http://127.0.0.1:5006/api/health' -UseBasicParsing -TimeoutSec 1
     if ($response.StatusCode -eq 200) { $backendReady = $true; break }
   } catch { Start-Sleep -Seconds 1 }
 }
@@ -40,9 +40,10 @@ Start-Process -FilePath 'cmd.exe' `
 Start-Sleep -Seconds 4
 
 Write-Host '== Probe ==' -Foreground Cyan
-try  { (Invoke-WebRequest 'http://127.0.0.1:8001/api/health' -UseBasicParsing -TimeoutSec 3).StatusCode | Out-Host } catch { Write-Host 'backend NOT up yet' }
+try  { (Invoke-WebRequest 'http://127.0.0.1:5006/api/health' -UseBasicParsing -TimeoutSec 3).StatusCode | Out-Host } catch { Write-Host 'backend NOT up yet' }
 try  { (Invoke-WebRequest 'http://127.0.0.1:5174/'         -UseBasicParsing -TimeoutSec 3).StatusCode | Out-Host } catch { Write-Host 'vite    NOT up yet' }
 
 Write-Host ''
 Write-Host 'Local URL: http://127.0.0.1:5174' -Foreground Green
-Write-Host 'Backend  : http://127.0.0.1:8001/api/health' -Foreground Green
+Write-Host 'Backend  : http://127.0.0.1:5006/api/health' -Foreground Green
+Write-Host '花生壳   : https://11gv92qt74799.vicp.fun' -Foreground Yellow

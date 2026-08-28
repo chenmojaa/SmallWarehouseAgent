@@ -19,9 +19,10 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.storage.hybrid import hybrid_search
-from app.storage.db import create_session, append_message, get_messages
-from app.agent.graph import graph
+from app.storage.db import create_session, append_message, get_messages, get_profile
+from app.agent.graph import get_graph
 from app.agent.nodes.answer import answer_node_stream
+from app.agent.memory import summarize_overflow
 
 router = APIRouter(tags=["chat"])
 _log = logging.getLogger("chat")
@@ -69,6 +70,24 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   history = get_messages(session_id, limit=16) if session_id else []
   if not history or history[-1] != {"role": "user", "content": query}:
     history.append({"role": "user", "content": query})
+
+  # Long-term memory (§6.5): load the cross-session profile for this session's
+  # user. Single-user local app -> one shared profile keyed by "default".
+  profile = {}
+  try:
+    profile = get_profile("default")
+  except Exception:
+    pass
+
+  # History summary (§6.3): only when the window overflows, compress the cut-off
+  # older turns so follow-ups still see the gist. Best-effort, never blocks.
+  summary = ""
+  if len(history) > 12:
+    try:
+      summary = summarize_overflow(history)
+    except Exception:
+      summary = ""
+
   return {
     "messages": history,
     "session_id": session_id,
@@ -81,6 +100,20 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "reasoning_level_override": body.reasoning_level,
     "embedding_model_override": emb_model,
     "step_count": 0,
+    "profile": profile,
+    "summary": summary,
+    # Per-turn fields must be reset: with a persistent SQLite checkpointer any
+    # field absent from this input would leak from the previous turn's checkpoint
+    # (e.g. a stale intent="ingest" re-routing a plain chat turn to the ingest node).
+    "intent": "",
+    "rewritten_query": "",
+    "skip_retrieval": False,
+    "research_iterations": 0,
+    "research_notes": [],
+    "ingest_result": {},
+    "report_result": {},
+    "answer": None,
+    "citations": [],
   }
 
 
@@ -127,6 +160,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       # state continuity.
       graph_config = {"configurable": {"thread_id": session_id}} if session_id else None
       try:
+        graph = await get_graph()
         async for event in graph.astream(initial_state, config=graph_config):
           for node_name, delta in (event or {}).items():
             if not isinstance(delta, dict):

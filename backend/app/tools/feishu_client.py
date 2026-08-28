@@ -1,4 +1,4 @@
-﻿"""Feishu (Lark) Open API client.
+"""Feishu (Lark) Open API client.
 
 Covers:
   - tenant_access_token acquisition + caching (TTL ~2h, refreshed proactively)
@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.storage import feishu_config_store as _fcs
 
 
 class FeishuError(RuntimeError):
@@ -35,9 +36,12 @@ class FeishuClient:
 
     def __init__(self, app_id: str | None = None, app_secret: str | None = None,
                  api_base: str | None = None, timeout: float = 30.0):
-        self.app_id = app_id or settings.feishu_app_id
-        self.app_secret = app_secret or settings.feishu_app_secret
-        self.api_base = (api_base or settings.feishu_api_base).rstrip("/")
+        # Resolve credentials from the UI config store first, falling back to
+        # env vars inside the store. This lets each user point the app at their
+        # own Feishu app without editing .env.
+        self.app_id = app_id or _fcs.get_app_id()
+        self.app_secret = app_secret or _fcs.get_app_secret()
+        self.api_base = (api_base or _fcs.get_api_base()).rstrip("/")
         self.timeout = timeout
         self._token: str | None = None
         self._token_expire_at: float = 0.0

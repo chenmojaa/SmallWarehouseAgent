@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useModelsStore, type ReasoningLevel, type CustomModelEntry } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
 import { detectModels } from '@/api/custom-models'
-import { getFeishuConfig, updateFeishuConfig } from '@/api/feishu'
+import { getFeishuConfig, updateFeishuConfig, testFeishuConnection } from '@/api/feishu'
 import {
   NCard, NSpace, NText, NTag, NInput, NButton, useMessage,
   NPopconfirm, NEmpty,
@@ -22,8 +22,17 @@ const detected = ref<{ provider: string; models: string[] } | null>(null)
 
 // Feishu config
 const feishuWebUrl = ref('')
+const feishuAppId = ref('')
+const feishuAppSecret = ref('')
+const feishuApiBase = ref('')
+const feishuSpaceIds = ref('')
+const feishuSecretSet = ref(false)
+const feishuSecretMasked = ref('')
+const feishuConfigured = ref(false)
 const feishuLoading = ref(false)
 const feishuSaving = ref(false)
+const feishuTesting = ref(false)
+const feishuTestSpaces = ref<{ space_id: string; name?: string }[]>([])
 
 onMounted(() => {
   settings.init()
@@ -86,6 +95,14 @@ async function loadFeishuConfig() {
   try {
     const cfg = await getFeishuConfig()
     feishuWebUrl.value = cfg.web_url || ''
+    feishuAppId.value = cfg.app_id || ''
+    feishuApiBase.value = cfg.api_base || ''
+    feishuSpaceIds.value = (cfg.space_ids || []).join(', ')
+    feishuSecretSet.value = cfg.app_secret_set
+    feishuSecretMasked.value = cfg.app_secret_masked || ''
+    feishuConfigured.value = cfg.configured
+    // Secret is never returned; leave the input empty. Placeholder shows masked value.
+    feishuAppSecret.value = ''
   } catch (e) {
     // silent fail - config may not be available
   } finally {
@@ -96,12 +113,40 @@ async function loadFeishuConfig() {
 async function saveFeishuConfig() {
   feishuSaving.value = true
   try {
-    await updateFeishuConfig(feishuWebUrl.value.trim())
+    const patch: Record<string, string> = {
+      web_url: feishuWebUrl.value.trim(),
+      app_id: feishuAppId.value.trim(),
+      api_base: feishuApiBase.value.trim(),
+      space_ids: feishuSpaceIds.value.trim(),
+    }
+    // Only send the secret when the user actually typed a new one.
+    if (feishuAppSecret.value.trim()) {
+      patch.app_secret = feishuAppSecret.value.trim()
+    }
+    const cfg = await updateFeishuConfig(patch)
+    feishuSecretSet.value = cfg.app_secret_set
+    feishuSecretMasked.value = cfg.app_secret_masked || ''
+    feishuConfigured.value = cfg.configured
+    feishuAppSecret.value = ''
     message.success('飞书配置已保存')
   } catch (e) {
     message.error((e as Error).message)
   } finally {
     feishuSaving.value = false
+  }
+}
+
+async function testFeishu() {
+  feishuTesting.value = true
+  feishuTestSpaces.value = []
+  try {
+    const r = await testFeishuConnection()
+    feishuTestSpaces.value = r.spaces || []
+    message.success(`连接成功，可见 ${r.spaces.length} 个知识空间`)
+  } catch (e) {
+    message.error('连接失败: ' + (e as Error).message)
+  } finally {
+    feishuTesting.value = false
   }
 }
 </script>
@@ -166,20 +211,67 @@ async function saveFeishuConfig() {
 
     <n-card title="飞书知识库配置" :bordered="false">
       <n-space vertical :size="10">
-        <n-text depth="3" style="font-size: 12px">配置飞书文档的查看域名，用于在知识库中生成"查看"链接</n-text>
+        <n-space align="center" :size="6">
+          <n-text depth="3" style="font-size: 12px">连接你自己的飞书应用，把知识库文档同步进来</n-text>
+          <n-tag size="small" :type="feishuConfigured ? 'success' : 'default'">
+            {{ feishuConfigured ? '已配置' : '未配置' }}
+          </n-tag>
+        </n-space>
+
         <n-input
-          v-model:value="feishuWebUrl"
-          placeholder="例：https://xxx.feishu.cn"
+          v-model:value="feishuAppId"
+          placeholder="App ID（飞书开放平台 → 应用凭证）"
           :disabled="feishuLoading"
         />
-        <n-button
-          type="primary"
-          :loading="feishuSaving"
+        <n-input
+          v-model:value="feishuAppSecret"
+          type="password"
+          show-password-on="click"
+          :placeholder="feishuSecretSet ? '已保存：' + feishuSecretMasked + '（留空则保持不变）' : 'App Secret'"
           :disabled="feishuLoading"
-          @click="saveFeishuConfig"
-        >
-          保存飞书配置
-        </n-button>
+        />
+        <n-input
+          v-model:value="feishuApiBase"
+          placeholder="API 域名，默认 https://open.feishu.cn"
+          :disabled="feishuLoading"
+        />
+        <n-input
+          v-model:value="feishuSpaceIds"
+          placeholder="知识空间 ID，逗号分隔（留空 = 同步全部可见空间）"
+          :disabled="feishuLoading"
+        />
+        <n-input
+          v-model:value="feishuWebUrl"
+          placeholder="查看域名，例：https://xxx.feishu.cn（用于生成文档查看链接）"
+          :disabled="feishuLoading"
+        />
+
+        <n-space>
+          <n-button
+            type="primary"
+            :loading="feishuSaving"
+            :disabled="feishuLoading"
+            @click="saveFeishuConfig"
+          >
+            保存飞书配置
+          </n-button>
+          <n-button
+            :loading="feishuTesting"
+            :disabled="feishuLoading || !feishuConfigured"
+            @click="testFeishu"
+          >
+            测试连接
+          </n-button>
+        </n-space>
+
+        <div v-if="feishuTestSpaces.length" style="border-top: 1px solid var(--border-soft); padding-top: 10px">
+          <n-text style="font-size: 13px">可见的知识空间（{{ feishuTestSpaces.length }}）</n-text>
+          <n-space vertical :size="2" style="margin-top: 6px; padding-left: 4px">
+            <n-text v-for="s in feishuTestSpaces" :key="s.space_id" style="font-family: monospace; font-size: 13px; padding: 1px 0">
+              {{ s.name || '(未命名)' }} · {{ s.space_id }}
+            </n-text>
+          </n-space>
+        </div>
       </n-space>
     </n-card>
   </div>

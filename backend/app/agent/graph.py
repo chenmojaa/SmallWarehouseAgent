@@ -11,10 +11,14 @@ default is graph-driven.
 """
 from __future__ import annotations
 
+import os
+
+import aiosqlite
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.agent.state import AgentState
+from app.config import settings
 from app.agent.nodes.ingest import ingest_node
 from app.agent.nodes.report import report_node
 from app.agent.nodes.research import research_node
@@ -22,7 +26,7 @@ from app.agent.nodes.retrieve import retrieve_node
 from app.agent.nodes.router import route_by_intent, router_node
 
 
-def build_graph():
+def _build_workflow() -> StateGraph:
   g = StateGraph(AgentState)
   g.add_node("router", router_node)
   g.add_node("retrieve", retrieve_node)
@@ -42,14 +46,25 @@ def build_graph():
   g.add_edge("research", END)
   g.add_edge("ingest", END)
   g.add_edge("report", END)
-  # Phase 3.2: attach a MemorySaver so the graph can persist state per
-  # thread_id across calls. SQLite-backed AsyncSqliteSaver is the next step
-  # (see CONTEXT_UPGRADE.md Phase 3); MemorySaver is enough to prove the
-  # thread_id -> history recovery wiring works in this PR. The checkpointer
-  # is shared as a module-level singleton so all callers of `graph` below
-  # see the same one without rebuilding the compiled object.
-  checkpointer = MemorySaver()
-  return g.compile(checkpointer=checkpointer)
+  return g
 
 
-graph = build_graph()
+# ---- Lazy async graph singleton ----
+# AsyncSqliteSaver.__init__ calls asyncio.get_running_loop(), so the saver (and
+# therefore the compiled graph) cannot be constructed at import time. We build it
+# once on first async use and cache it. The aiosqlite connection is opened lazily
+# by the saver and lives for the process lifetime.
+_graph = None
+_conn = None
+
+
+async def get_graph():
+  """Return the compiled graph, building the SQLite checkpointer on first call."""
+  global _graph, _conn
+  if _graph is None:
+    ckpt_path = os.path.join(settings.data_dir, "checkpoints.sqlite")
+    os.makedirs(settings.data_dir, exist_ok=True)
+    _conn = aiosqlite.connect(ckpt_path)
+    checkpointer = AsyncSqliteSaver(_conn)
+    _graph = _build_workflow().compile(checkpointer=checkpointer)
+  return _graph
