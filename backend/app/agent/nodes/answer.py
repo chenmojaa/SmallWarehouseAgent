@@ -1,4 +1,26 @@
-"""Answer node - LangChain ChatOpenAI with structured output and streaming."""
+﻿"""Answer node - LangChain chat model with optional tool-calling.
+
+Two entry points are kept on purpose:
+
+  - ``answer_node`` (non-streaming, structured output via AnswerResult). This is
+    only used by legacy code paths that want a JSON answer; tool-calling is
+    not combined with ``with_structured_output`` because most providers will not
+    return tool_calls when constrained to a JSON schema.
+
+  - ``answer_node_stream`` is what chat.py drives. When ``settings.tools_enabled``
+    is on AND there is at least one registered tool (skills or MCP), we bind
+    the tools to the chat model and run a tool-call loop:
+
+      1. invoke the model with the current message list
+      2. if the response has ``tool_calls`` -> execute them, append a
+         ``ToolMessage`` for each, continue
+      3. the first response *without* tool_calls is the final answer; we emit
+         the body as one ``text_delta`` event and yield ``done`` with citations
+
+    A small capability inventory is appended to the answer system prompt so the
+    model knows which MCP servers / skills exist without having to call the
+    registry first.
+"""
 from __future__ import annotations
 
 import re
@@ -7,18 +29,33 @@ from app.llm.factory import _build_model
 from app.agent.state import AgentState
 from app.agent.prompts import get_answer_instructions
 from app.agent.context import build_messages
+from app.agent.tools import load_tools, inventory_text
+from app.config import settings
 
 
-# Phase 4.1: prompt now lives in app/agent/prompts/config.yaml with a built-in
-# default fallback in prompts/__init__.py. The variable keeps the same name
-# so the rest of this file and any downstream import see no change. Resolved
-# once at import; runtime retuning via YAML requires a process restart.
 ANSWER_INSTRUCTIONS = get_answer_instructions()
 
-
-# Captures a citation marker like [1], [ 12 ], or [3]. We tolerate whitespace and
-# trailing punctuation; out-of-range indices are dropped downstream.
 _CITE_RE = re.compile(r"\[\s*(\d+)\s*\]")
+
+
+def _coerce(content) -> str:
+  """Normalise LangChain message content (str | list[dict] | None) to str."""
+  if content is None:
+    return ""
+  if isinstance(content, str):
+    return content
+  if isinstance(content, list):
+    parts = []
+    for part in content:
+      if isinstance(part, dict):
+        if part.get("type") == "text" and isinstance(part.get("text"), str):
+          parts.append(part["text"])
+        else:
+          parts.append(str(part))
+      else:
+        parts.append(str(part))
+    return "".join(parts)
+  return str(content)
 
 
 def _build_messages(state: AgentState):
@@ -35,9 +72,8 @@ def _build_messages(state: AgentState):
     m for m in (state.get("messages") or [])
     if m.get("role") in ("user", "assistant") and m.get("content")
   ]
-  # Unified assembly (§7): system prompt + summary + profile + token-budgeted
-  # references + sliding-window history + question. Replaces the old inline
-  # [-8:] slice which had no token cap and could blow small-model contexts.
+  tools = load_tools() if settings.tools_enabled else []
+  inventory = inventory_text() if settings.tools_enabled else ""
   msgs = build_messages(
     instructions=ANSWER_INSTRUCTIONS,
     chunks=chunks,
@@ -46,16 +82,16 @@ def _build_messages(state: AgentState):
     summary=state.get("summary") or "",
     profile=state.get("profile") or None,
   )
-  return chat, msgs, chunks
+  if inventory:
+    from langchain_core.messages import SystemMessage
+    if msgs and isinstance(msgs[0], SystemMessage):
+      msgs[0] = SystemMessage(content=(msgs[0].content or "") + inventory)
+    else:
+      msgs = [SystemMessage(content=inventory)] + msgs
+  return chat, msgs, chunks, tools, inventory
 
 
 def _citations_from_text(text: str, chunks: list) -> list:
-  """Extract cited chunks from `[n]` markers, returned in index order.
-
-  The frontend expects citations[n-1] to correspond to the [n] marker, so
-  the array must be sorted by chunk index (not by first-seen order). Bad
-  indices and out-of-range references are silently skipped.
-  """
   if not text or not chunks:
     return []
   seen: set = set()
@@ -66,7 +102,6 @@ def _citations_from_text(text: str, chunks: list) -> list:
       continue
     seen.add(idx)
     indices.append(idx)
-  # Sort by index so citations[n-1] always matches the [n] marker.
   indices.sort()
   out: list = []
   for idx in indices:
@@ -83,13 +118,18 @@ def _citations_from_text(text: str, chunks: list) -> list:
   return out
 
 
+def _tool_by_name(tools, name: str):
+  for t in tools:
+    if getattr(t, "name", None) == name:
+      return t
+  return None
+
+
 def answer_node(state: AgentState) -> dict:
-  """Non-streaming variant: a single structured call returns text + citations."""
-  chat, msgs, chunks = _build_messages(state)
-  # We import lazily because with_structured_output requires LangChain core.
+  """Non-streaming variant: single structured call. No tool-calling here."""
+  chat, msgs, chunks, _tools, _inventory = _build_messages(state)
   from langchain_core.output_parsers import PydanticOutputParser
   from app.agent.schemas import AnswerResult
-
   structured = chat.with_structured_output(AnswerResult)
   result = structured.invoke(msgs)
   citations = [c.model_dump() for c in (result.citations or [])] or _citations_from_text(result.text, chunks)
@@ -101,21 +141,79 @@ def answer_node(state: AgentState) -> dict:
 
 
 async def answer_node_stream(state: AgentState):
-  """Stream the answer as one LLM call, then derive citations from `[n]` markers.
+  """Stream the answer as one LLM call, then derive citations from [n] markers.
 
-  Single-pass: avoids the previous double-call (text stream + structured re-call)
-  which doubled latency and tokens on providers that don't share KV cache between
-  the two requests.
+  Tool-calling path: when tools are available we bind them and run a tool-call
+  loop. ``tool_call`` and ``tool_result`` SSE events surface every invocation
+  (the frontend can ignore them silently). The first non-tool-call response is
+  emitted as a single ``text_delta`` event followed by ``done``.
   """
-  chat, msgs, chunks = _build_messages(state)
+  chat, msgs, chunks, tools, _inventory = _build_messages(state)
   full_text = ""
-  try:
-    async for chunk in chat.astream(msgs):
-      delta = getattr(chunk, "content", "") or ""
-      if delta:
-        full_text += delta
-        yield ("text_delta", delta)
-  except Exception as e:
-    yield ("error", "%s: %s" % (type(e).__name__, e))
-    return
+
+  if tools and settings.tools_enabled:
+    from langchain_core.messages import ToolMessage
+    bound = chat.bind_tools(tools)
+    max_steps = max(1, int(getattr(settings, "tools_max_steps", 4) or 4))
+
+    for _step in range(max_steps):
+      try:
+        resp = await bound.ainvoke(msgs)
+      except Exception as e:
+        yield ("error", "%s: %s" % (type(e).__name__, e))
+        return
+
+      tcs = list(getattr(resp, "tool_calls", None) or [])
+      if not tcs:
+        full_text = _coerce(getattr(resp, "content", ""))
+        if full_text:
+          yield ("text_delta", full_text)
+        break
+
+      yield ("tool_calls_batch", {
+        "count": len(tcs),
+        "names": [tc.get("name") for tc in tcs],
+      })
+      msgs = msgs + [resp]
+      for tc in tcs:
+        name = tc.get("name") or "unknown_tool"
+        args = tc.get("args") or {}
+        tc_id = tc.get("id") or ""
+        yield ("tool_call", {"name": name, "args": args})
+        tool = _tool_by_name(tools, name)
+        if tool is None:
+          observation = "[tool error] unknown tool %r" % name
+          ok = False
+        else:
+          try:
+            out = await tool.ainvoke(args)
+            observation = out if isinstance(out, str) else str(out)
+            ok = True
+          except Exception as e:
+            observation = "[tool error] %s: %s" % (type(e).__name__, e)
+            ok = False
+        snippet = observation[:300] if isinstance(observation, str) else str(observation)[:300]
+        yield ("tool_result", {"name": name, "ok": ok, "snippet": snippet})
+        msgs = msgs + [ToolMessage(content=observation, tool_call_id=tc_id)]
+    else:
+      # ran out of steps without a text answer; force one last pass
+      try:
+        resp = await bound.ainvoke(msgs)
+        full_text = _coerce(getattr(resp, "content", ""))
+        if full_text:
+          yield ("text_delta", full_text)
+      except Exception as e:
+        yield ("error", "%s: %s" % (type(e).__name__, e))
+        return
+  else:
+    try:
+      async for chunk in chat.astream(msgs):
+        delta = getattr(chunk, "content", "") or ""
+        if delta:
+          full_text += delta
+          yield ("text_delta", delta)
+    except Exception as e:
+      yield ("error", "%s: %s" % (type(e).__name__, e))
+      return
+
   yield ("done", {"answer": full_text, "citations": _citations_from_text(full_text, chunks)})

@@ -1,4 +1,4 @@
-from functools import lru_cache
+﻿from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,11 @@ class Settings(BaseSettings):
   notes_dir: str = "./data/notes"
 
 
+  # ---- Agent tools (tool-calling for MCP + skills) ----
+  tools_enabled: bool = True                       # HD_TOOLS_ENABLED; master switch for tool-calling
+  tools_max_steps: int = 4                          # HD_TOOLS_MAX_STEPS; cap on tool-call iterations
+  mcp_call_timeout_sec: float = 30.0                # HD_MCP_CALL_TIMEOUT; per-tool call budget
+  mcp_init_timeout_sec: float = 10.0                # HD_MCP_INIT_TIMEOUT; per-server startup budget
   # ---- Feishu (Lark) sync ----
   feishu_enabled: bool = False
   feishu_app_id: str = ""
