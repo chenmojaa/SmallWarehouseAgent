@@ -180,9 +180,12 @@ def _sync_docx_node(client: FeishuClient, space_id: str, node: dict,
 
     existing = _find_note(source_url)
     if existing and not force_full:
-        if revision and existing.source_revision == revision:
+        # Skip only when the revision matches AND the note is fully indexed.
+        # A note whose first ingest failed to embed (embedded=False) must be
+        # retried on every sync cycle, otherwise it stays "待索引" forever.
+        if revision and existing.source_revision == revision and existing.embedded:
             return node_token, "skipped", None
-        # revision changed (or unknown -> treat as update)
+        # revision changed (or unknown / un-indexed -> treat as update)
         try:
             raw = client.get_docx_raw_content(obj_token)
             parsed = parse_feishu_docx(obj_token, title, raw)
@@ -204,7 +207,9 @@ def _sync_docx_node(client: FeishuClient, space_id: str, node: dict,
             source_url=source_url,
             api_key=api_key, base_url=base_url, embedding_model=embedding_model,
         )
-        if revision:
+        # Only advance the revision when embedding succeeded; otherwise the
+        # next sync cycle retries this note instead of skipping it forever.
+        if revision and note.embedded:
             update_note_revision(note.id, revision)
         return node_token, "synced", None
     except Exception as e:
@@ -231,7 +236,9 @@ def _sync_bitable_for_node(client: FeishuClient, node: dict,
         source_url = _bitable_source_url(app_token, table_id)
         existing = _find_note(source_url)
         if existing and not force_full:
-            if revision and existing.source_revision == revision:
+            # Skip only when revision matches AND the note is fully indexed;
+            # un-indexed notes must be retried every cycle.
+            if revision and existing.source_revision == revision and existing.embedded:
                 results.append((table_id, "skipped", None))
                 continue
             try:
@@ -257,7 +264,8 @@ def _sync_bitable_for_node(client: FeishuClient, node: dict,
                 source_url=source_url,
                 api_key=api_key, base_url=base_url, embedding_model=embedding_model,
             )
-            if revision:
+            # Only advance the revision when embedding succeeded.
+            if revision and note.embedded:
                 update_note_revision(note.id, revision)
             results.append((table_id, "synced", None))
         except Exception as e:

@@ -1,5 +1,6 @@
 const BASE = "/api"
 const KEY_STORAGE = "second_brain_api_key"
+const TOKEN_KEY = "hd_auth_token"
 
 export function getApiKey(): string {
   try { return localStorage.getItem(KEY_STORAGE) || "" }
@@ -13,9 +14,32 @@ export function setApiKey(k: string) {
   } catch {}
 }
 
+/** 401 时清除登录态并跳转登录页（避免在登录页死循环） */
+function handleUnauthorized() {
+  try { localStorage.removeItem(TOKEN_KEY) } catch {}
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login"
+  }
+}
+
 function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
   const k = getApiKey().trim()
-  return k ? { "X-API-Key": k } : {}
+  if (k) headers["X-API-Key"] = k
+  try {
+    const t = (localStorage.getItem(TOKEN_KEY) || "").trim()
+    if (t) headers["X-Auth-Token"] = t
+  } catch {}
+  return headers
+}
+
+/** 仅登录 token 头，供 FormData 上传等场景与其它头合并 */
+export function authTokenHeaders(): Record<string, string> {
+  try {
+    const t = (localStorage.getItem(TOKEN_KEY) || "").trim()
+    if (t) return { "X-Auth-Token": t }
+  } catch {}
+  return {}
 }
 
 export async function get<T>(path: string): Promise<T> {
@@ -30,10 +54,15 @@ export async function get<T>(path: string): Promise<T> {
       continue
     }
     if (res.ok) return res.json() as Promise<T>
+    if (res.status === 401) { handleUnauthorized(); break }
     lastError = new Error(res.status + " " + (await res.text()))
     if (res.status < 500) break
   }
   throw lastError
+}
+
+function throwIfUnauthorized(status: number) {
+  if (status === 401) handleUnauthorized()
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
@@ -42,6 +71,7 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   })
+  throwIfUnauthorized(res.status)
   if (!res.ok) throw new Error(res.status + " " + (await res.text()))
   return res.json() as Promise<T>
 }
@@ -52,12 +82,14 @@ export async function postJsonPatch<T>(path: string, body: unknown): Promise<T> 
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   })
+  throwIfUnauthorized(res.status)
   if (!res.ok) throw new Error(res.status + " " + (await res.text()))
   return res.json() as Promise<T>
 }
 
 export async function deleteReq(path: string): Promise<unknown> {
   const res = await fetch(BASE + path, { method: "DELETE", headers: { ...authHeaders() } })
+  throwIfUnauthorized(res.status)
   if (!res.ok) throw new Error(res.status + " " + (await res.text()))
   return res.json()
 }
@@ -69,7 +101,10 @@ export async function* streamSse(path: string, body: unknown, signal?: AbortSign
     body: JSON.stringify(body),
     signal,
   })
-  if (!res.ok || !res.body) throw new Error("HTTP " + res.status)
+  if (!res.ok || !res.body) {
+    throwIfUnauthorized(res.status)
+    throw new Error("HTTP " + res.status)
+  }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

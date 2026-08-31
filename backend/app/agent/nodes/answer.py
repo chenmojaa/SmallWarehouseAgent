@@ -71,6 +71,8 @@ def _citations_from_text(text: str, chunks: list) -> list:
       "chunk_index": c.get("chunk_index"),
       "snippet": (c.get("text") or "")[:240],
       "score": c.get("final_score"),
+      "source_type": c.get("source_type", ""),
+      "source_url": c.get("source_url", ""),
     })
   return out
 

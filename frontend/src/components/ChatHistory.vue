@@ -213,7 +213,7 @@ function sourceLabel(skill: InstalledSkill) {
 <template>
   <div class="chat-history">
     <div class="chat-history-actions">
-      <n-button block @click="newChat" class="action-btn new-chat-btn">+ 新对话</n-button>
+      <n-button block quaternary @click="newChat" class="action-btn new-chat-btn">+ 新对话</n-button>
       <n-button block quaternary @click="gotoNotes" class="action-btn">知识库</n-button>
       <n-button block quaternary @click="openSearch" class="action-btn">搜索对话</n-button>
       <n-button block quaternary @click="openSkill" class="action-btn">技能</n-button>
@@ -384,7 +384,6 @@ function sourceLabel(skill: InstalledSkill) {
   background: var(--hover-bg) !important;
 }
 .new-chat-btn {
-  background: var(--hover-bg) !important;
   font-weight: 600;
 }
 .new-chat-btn:hover {

@@ -234,7 +234,7 @@ onBeforeUnmount(() => {
 .bubble-row.assistant { justify-content: flex-start; }
 
 .bubble {
-  max-width: 70%;
+  max-width: 85%;
   padding: 10px 14px;
   border-radius: 10px;
   white-space: pre-wrap;

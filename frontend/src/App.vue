@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent,
   NMessageProvider, NSpace, NText, NButton, darkTheme, lightTheme,
@@ -7,8 +8,15 @@ import {
 import { useSettingsStore } from '@/stores/settings'
 import { useSessionsStore } from '@/stores/sessions'
 import { useModelsStore } from '@/stores/models'
+import { useAuthStore } from '@/stores/auth'
 import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
+
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+
+const isLoginPage = computed(() => route.name === 'login')
 
 const BRAND_BLUE = '#3b82f6'
 const naiveOverrides = computed(() => ({
@@ -39,12 +47,30 @@ function retryFailedLoads() {
 }
 
 onMounted(() => {
+  // init 应用主题与本地 key 状态（登录页也需要主题）
   settings.init()
+  if (isLoginPage.value) return
   settings.fetch()
   sessions.load()
   models.loadFromBackend()
   retryTimer = window.setInterval(retryFailedLoads, 8000)
 })
+
+// 登录成功后从登录页进入应用时，再执行初始化加载
+watch(isLoginPage, (nowLogin, wasLogin) => {
+  if (wasLogin && !nowLogin) {
+    settings.init()
+    settings.fetch()
+    sessions.load()
+    models.loadFromBackend()
+    if (retryTimer === null) retryTimer = window.setInterval(retryFailedLoads, 8000)
+  }
+})
+
+function handleLogout() {
+  auth.logout()
+  router.replace('/login')
+}
 
 onBeforeUnmount(() => {
   if (retryTimer !== null) window.clearInterval(retryTimer)
@@ -65,7 +91,10 @@ function toggleSider() {
 <template>
   <n-config-provider :theme="naiveTheme" :theme-overrides="naiveOverrides">
     <n-message-provider>
-      <n-layout style="height: 100vh">
+      <!-- 登录页：独立全屏视图，不渲染主布局 -->
+      <router-view v-if="isLoginPage" />
+
+      <n-layout v-else style="height: 100vh">
         <n-layout-header bordered style="padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; height: 48px">
           <n-space align="center">
             <button
@@ -98,6 +127,8 @@ function toggleSider() {
             </button>
             <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">笔记</n-button></router-link>
             <router-link to="/settings" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">设置</n-button></router-link>
+            <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
+            <n-button quaternary size="small" @click="handleLogout">退出</n-button>
           </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">

@@ -12,7 +12,8 @@ interface State {
   loading: boolean
   ingesting: boolean
   error: string | null
-  uploadProgress: { name: string; status: 'uploading' | 'done' | 'failed'; message?: string } | null
+  uploadProgress: { name: string; status: 'uploading' | 'done' | 'failed' | 'canceled'; message?: string } | null
+  uploadAbort: AbortController | null
 }
 
 export const useNotesStore = defineStore('notes', {
@@ -24,6 +25,7 @@ export const useNotesStore = defineStore('notes', {
     ingesting: false,
     error: null,
     uploadProgress: null,
+    uploadAbort: null,
   }),
   actions: {
     async load() {
@@ -79,15 +81,17 @@ export const useNotesStore = defineStore('notes', {
       }
     },
     async uploadFile(file: File) {
+      const abort = new AbortController()
+      this.uploadAbort = abort
       this.uploadProgress = { name: file.name, status: 'uploading' }
       this.error = null
       try {
         const name = file.name.toLowerCase()
         let note
         if (name.match(/\.(png|jpg|jpeg|webp|bmp|tif|tiff)$/)) {
-          note = await ingestImage(file)
+          note = await ingestImage(file, undefined, abort.signal)
         } else {
-          note = await ingestFile(file)
+          note = await ingestFile(file, undefined, abort.signal)
         }
         this.items.unshift(note)
         this.total += 1
@@ -96,11 +100,22 @@ export const useNotesStore = defineStore('notes', {
         setTimeout(() => { this.uploadProgress = null }, 2500)
         return note
       } catch (e) {
+        // User-initiated abort -> show "canceled", not an error.
+        if (abort.signal.aborted) {
+          this.uploadProgress = { name: file.name, status: 'canceled' }
+          setTimeout(() => { this.uploadProgress = null }, 2500)
+          return null
+        }
         this.uploadProgress = { name: file.name, status: 'failed', message: (e as Error).message }
         this.error = (e as Error).message
         setTimeout(() => { this.uploadProgress = null }, 5000)
         throw e
+      } finally {
+        this.uploadAbort = null
       }
+    },
+    cancelUpload() {
+      if (this.uploadAbort) this.uploadAbort.abort()
     },
     async reembed(id: string) {
       const updated = await reembedNote(id)

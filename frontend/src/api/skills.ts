@@ -1,4 +1,4 @@
-import { get, postJson, deleteReq } from './client'
+import { get, postJson, deleteReq, authTokenHeaders } from './client'
 
 export interface RecommendedSkill {
   id: string
@@ -48,6 +48,7 @@ export async function uploadSkillFiles(files: File[], sourceName?: string): Prom
   })
   const response = await fetch('/api/skills/upload', {
     method: 'POST',
+    headers: { ...authTokenHeaders() },
     body: form,
   })
   if (!response.ok) throw new Error(await response.text())

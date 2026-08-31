@@ -110,7 +110,7 @@ async function addText() {
 async function uploadOne(file: File) {
   try {
     const note = await notes.uploadFile(file)
-    message.info(`已添加：${note.title}`)
+    if (note) message.info(`已添加：${note.title}`)
   } catch (error) {
     message.error(`${file.name}: ${(error as Error).message}`)
   }
@@ -286,14 +286,20 @@ function openExternal(url?: string | null) {
       </div>
 
       <div v-if="tab === 'upload'" class="drop-zone" :class="{ active: dragOver }" @drop="handleDrop" @dragover="handleDragOver" @dragleave="handleDragLeave">
+        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 16V4" />
+          <path d="m7 9 5-5 5 5" />
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+        </svg>
         <strong>拖拽文件到这里</strong>
         <p>PDF · DOCX · PPTX · XLSX · CSV · HTML · TXT/MD · 图片 OCR</p>
         <n-upload :accept="ACCEPT" :custom-request="uploadHandler" :show-file-list="false" multiple>
-          <n-button round>选择文件</n-button>
+          <n-button type="primary" round>选择文件</n-button>
         </n-upload>
         <div v-if="notes.uploadProgress" class="progress-note" :class="notes.uploadProgress.status">
           <n-spin v-if="notes.uploadProgress.status === 'uploading'" size="small" />
-          <span>{{ notes.uploadProgress.name }} {{ notes.uploadProgress.status === 'uploading' ? '处理中' : notes.uploadProgress.status === 'done' ? '完成' : notes.uploadProgress.message }}</span>
+          <span>{{ notes.uploadProgress.name }} {{ notes.uploadProgress.status === 'uploading' ? '处理中' : notes.uploadProgress.status === 'done' ? '完成' : notes.uploadProgress.status === 'canceled' ? '已取消' : notes.uploadProgress.message }}</span>
+          <button v-if="notes.uploadProgress.status === 'uploading'" class="cancel-btn" @click="notes.cancelUpload()">取消</button>
         </div>
       </div>
 
@@ -493,8 +499,25 @@ function openExternal(url?: string | null) {
 }
 
 .metric-card {
-  padding: 15px 16px;
+  padding: 16px 18px;
   border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(to bottom, #3b82f6, #8b5cf6);
+  opacity: .7;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
 }
 
 .metric-card span,
@@ -507,9 +530,13 @@ function openExternal(url?: string | null) {
 .metric-card strong {
   display: block;
   margin: 7px 0;
-  font-size: 25px;
+  font-size: 26px;
   line-height: 1;
   letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--text-primary), color-mix(in srgb, var(--text-primary) 55%, #3b82f6));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .panel-card {
@@ -593,12 +620,14 @@ function openExternal(url?: string | null) {
 }
 
 .drop-zone {
-  min-height: 165px;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 9px;
-  border-radius: 13px;
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 12px 18px;
+  border-radius: 14px;
   border: 1.5px dashed color-mix(in srgb, #3b82f6 38%, transparent);
   background: rgba(59, 130, 246, 0.06);
   transition: all .2s ease;
@@ -610,7 +639,31 @@ function openExternal(url?: string | null) {
   background: rgba(59, 130, 246, 0.11);
 }
 
+.drop-zone > strong {
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+}
+
 .drop-zone p { margin: 0; color: var(--text-muted); font-size: 12px; text-align: center; }
+
+/* n-upload 的触发器默认 inline-block，不居中；强制居中对齐 */
+.drop-zone :deep(.n-upload),
+.drop-zone :deep(.n-upload-trigger) {
+  display: flex;
+  justify-content: center;
+}
+
+.drop-icon {
+  width: 26px;
+  height: 26px;
+  color: #3b82f6;
+  opacity: 0.85;
+}
+
+.drop-zone.active .drop-icon {
+  transform: translateY(-3px);
+  transition: transform .2s ease;
+}
 
 .progress-note {
   display: flex;
@@ -626,6 +679,25 @@ function openExternal(url?: string | null) {
 }
 
 .progress-note.failed span { color: #ef4444; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+
+.progress-note.canceled span { color: var(--text-muted); }
+
+.cancel-btn {
+  border: 0;
+  background: transparent;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: all .2s ease;
+}
+
+.cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
 
 .inline-form {
   display: grid;
@@ -698,20 +770,29 @@ function openExternal(url?: string | null) {
   font-size: 12px;
 }
 
-.note-list { border-top: 1px solid var(--border-soft); }
+.note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .note-item {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
   min-height: 68px;
-  padding: 12px 2px;
-  border-bottom: 1px solid var(--border-soft);
-  transition: opacity .2s ease;
+  padding: 13px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-app) 40%, transparent);
+  transition: border-color .2s ease, background .2s ease, transform .2s ease;
 }
 
-.note-item:last-child { border-bottom: 0; }
-.note-item:hover { background: var(--hover-bg); }
+.note-item:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: color-mix(in srgb, #3b82f6 5%, var(--bg-app));
+  transform: translateX(2px);
+}
 
 .note-main {
   min-width: 0;
@@ -748,27 +829,45 @@ function openExternal(url?: string | null) {
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
-  gap: 11px;
+  gap: 7px;
   color: var(--text-muted);
   font-size: 12px;
 }
 
+.note-actions > span {
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
 .note-actions a,
 .note-actions button {
-  border: 0;
+  border: 1px solid var(--border-soft);
   background: transparent;
-  padding: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
-  transition: color .2s ease;
+  transition: all .2s ease;
 }
 
 .note-actions a:hover,
-.note-actions button:hover { color: #3b82f6; }
-.note-actions button.warn:hover { color: #f59e0b; }
-.note-actions button.danger:hover { color: #ef4444; }
+.note-actions button:hover {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+.note-actions button.warn:hover {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+.note-actions button.danger:hover {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
 
 .loading-row,
 .empty-surface,

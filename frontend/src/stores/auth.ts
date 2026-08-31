@@ -1,0 +1,35 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+const TOKEN_KEY = 'hd_auth_token'
+const PHONE_KEY = 'hd_auth_phone'
+
+function readToken(): string {
+  try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' }
+}
+
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(readToken())
+  const phone = ref((() => { try { return localStorage.getItem(PHONE_KEY) || '' } catch { return '' } })())
+  const isLoggedIn = computed(() => !!token.value)
+
+  function setAuth(t: string, p: string) {
+    token.value = t
+    phone.value = p
+    try {
+      localStorage.setItem(TOKEN_KEY, t)
+      localStorage.setItem(PHONE_KEY, p)
+    } catch {}
+  }
+
+  function logout() {
+    token.value = ''
+    phone.value = ''
+    try {
+      localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(PHONE_KEY)
+    } catch {}
+  }
+
+  return { token, phone, isLoggedIn, setAuth, logout }
+})

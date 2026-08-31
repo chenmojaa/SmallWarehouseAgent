@@ -1,4 +1,4 @@
-import { get, postJson, deleteReq } from './client'
+import { get, postJson, deleteReq, authTokenHeaders } from './client'
 import { useModelsStore } from '@/stores/models'
 
 export interface Note {
@@ -50,13 +50,15 @@ function authHeaders(): Record<string, string> {
       out["X-Embedding-Model"] = "embo-01"
     }
   } catch {}
-  // 2) Fallback to the global key in localStorage
+  // Fallback to the global key in localStorage
   if (!out["X-API-Key"]) {
     try {
       const k = localStorage.getItem("second_brain_api_key") || ""
       if (k) out["X-API-Key"] = k
     } catch {}
   }
+  // 登录 token（受保护 API 必需）
+  Object.assign(out, authTokenHeaders())
   return out
 }
 
@@ -77,7 +79,7 @@ export async function ingestText(text: string, title?: string): Promise<Note> {
   return postJson<Note>("/notes/text", { text, title })
 }
 
-export async function ingestFile(file: File, lang = "chi_sim+eng"): Promise<Note> {
+export async function ingestFile(file: File, lang = "chi_sim+eng", signal?: AbortSignal): Promise<Note> {
   const fd = new FormData()
   fd.append("file", file)
   const url = `/notes/file${lang ? "" : ""}` // always use /notes/file
@@ -85,12 +87,13 @@ export async function ingestFile(file: File, lang = "chi_sim+eng"): Promise<Note
     method: "POST",
     headers: authHeaders(),
     body: fd,
+    signal,
   })
   if (!resp.ok) throw new Error(resp.status + " " + (await resp.text()))
   return resp.json() as Promise<Note>
 }
 
-export async function ingestImage(file: File, lang = "chi_sim+eng"): Promise<Note> {
+export async function ingestImage(file: File, lang = "chi_sim+eng", signal?: AbortSignal): Promise<Note> {
   const fd = new FormData()
   fd.append("file", file)
   fd.append("lang", lang)
@@ -98,6 +101,7 @@ export async function ingestImage(file: File, lang = "chi_sim+eng"): Promise<Not
     method: "POST",
     headers: authHeaders(),
     body: fd,
+    signal,
   })
   if (!resp.ok) throw new Error(resp.status + " " + (await resp.text()))
   return resp.json() as Promise<Note>

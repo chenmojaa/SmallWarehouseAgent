@@ -11,6 +11,8 @@ export interface Citation {
   chunk_index: number
   snippet: string
   score?: number
+  source_type?: string
+  source_url?: string
 }
 
 export interface ChatRequest {

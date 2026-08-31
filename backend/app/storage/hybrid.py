@@ -122,7 +122,7 @@ def hybrid_search(
   ]
   ranked = sorted(scored, key=lambda t: t[0], reverse=True)
 
-  from app.storage.db import get_note_title
+  from app.storage.db import get_note_title, get_note_meta
   results = []
   for final_s, dim_s, r in ranked:
     r["title"] = get_note_title(r["note_id"])
@@ -133,6 +133,11 @@ def hybrid_search(
       continue
     if dim_s < min_dim_score:
       continue
+    # Attach source metadata for frontend display (uploaded vs feishu)
+    meta = get_note_meta(r["note_id"])
+    if meta:
+      r["source_type"] = meta["source_type"]
+      r["source_url"] = meta["source_url"]
     results.append(r)
     if len(results) >= top_k:
       break

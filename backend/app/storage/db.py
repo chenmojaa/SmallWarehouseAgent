@@ -52,6 +52,17 @@ class UserProfile(SQLModel, table=True):
   facts_json: str = "{}"
   updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+
+class User(SQLModel, table=True):
+  """Login account: phone is the account identifier, password stored as PBKDF2 hash."""
+  __tablename__ = "users"
+  id: Optional[int] = Field(default=None, primary_key=True)
+  phone: str = Field(unique=True, index=True)
+  password_salt: str
+  password_hash: str
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+  updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 _engine = None
 
 
@@ -212,6 +223,15 @@ def get_note_title(note_id: str) -> str | None:
   with get_session() as s:
     n = s.get(Note, note_id)
     return n.title if n else None
+
+
+def get_note_meta(note_id: str) -> dict | None:
+  """Return {source_type, source_url} for a note, or None if not found."""
+  with get_session() as s:
+    n = s.get(Note, note_id)
+    if not n:
+      return None
+    return {"source_type": n.source_type, "source_url": n.source_url or ""}
 
 
 def update_note_revision(note_id: str, revision: str | None,

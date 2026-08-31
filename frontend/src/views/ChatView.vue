@@ -180,10 +180,10 @@ function onKey(e: KeyboardEvent) {
   min-height: 0;
 }
 .chat-container {
-  max-width: 800px;
-  width: 100%;
+  max-width: 1100px;
+  width: 90%;
   margin: 0 auto;
-  padding: 0 16px;
+  padding: 0 24px;
 }
 .input-container {
   padding: 8px 16px 10px;

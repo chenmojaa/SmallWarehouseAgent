@@ -111,6 +111,37 @@ def _profile_line(profile: dict) -> str:
     return ""
 
 
+def _strip_citation_rules(text: str) -> str:
+  """Remove citation-related rules from the system prompt when no chunks exist.
+
+  Prevents the LLM from faithfully following "末尾输出 来源：[n][m]..." and
+  emitting a bogus "来源：无" line when there is nothing to cite.
+  """
+  lines = text.split("\n")
+  out: list[str] = []
+  skip = False
+  for line in lines:
+    stripped = line.strip()
+    low = stripped.lower()
+    # Skip numbered rule "Cite sources by index [n]..."
+    if low.startswith("cite sources"):
+      continue
+    # Skip the "Citations:" bullet under Output format (and its continuation)
+    if low.startswith("citations:"):
+      skip = True
+      continue
+    # Continuation of the citations bullet (indented or starts with "listing")
+    if skip and (line.startswith("    ") or line.startswith("\t") or low.startswith("listing") or low.startswith("do not")):
+      continue
+    # Stop skipping when we hit a non-indented line that is not empty
+    if skip and stripped and not line[0].isspace():
+      skip = False
+    if skip:
+      continue
+    out.append(line)
+  return "\n".join(out)
+
+
 def build_messages(instructions: str,
                    chunks: list,
                    history: list[dict],
@@ -122,13 +153,23 @@ def build_messages(instructions: str,
   Order is fixed: system (instructions + summary + profile + references)
   -> trimmed history -> current question. The ``<<CONTEXT>>`` and
   ``<<QUESTION>>`` placeholders in ``instructions`` are filled here.
+
+  When there are no reference chunks, citation-related rules are stripped
+  from the instructions so the LLM does not output a bogus "来源：无" line.
   """
   from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-  system = instructions.replace("<<CONTEXT>>", format_context(chunks))
-  system = system.replace("<<QUESTION>>", question)
+  context_block = format_context(chunks)
+  has_chunks = bool(chunks)
+  sys_text = instructions.replace("<<CONTEXT>>", context_block)
+  sys_text = sys_text.replace("<<QUESTION>>", question)
 
-  parts = [system]
+  # Strip citation rules when there is nothing to cite — otherwise the model
+  # faithfully follows the prompt and emits "来源：无" at the end.
+  if not has_chunks:
+    sys_text = _strip_citation_rules(sys_text)
+
+  parts = [sys_text]
   if summary:
     parts.append("[history summary] " + summary[:400])
   line = _profile_line(profile or {})

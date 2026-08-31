@@ -16,6 +16,7 @@ from app.api.sessions import router as sessions_router
 from app.api.custom_models import router as custom_models_router
 from app.api.feishu import router as feishu_router
 from app.api.skills import router as skills_router
+from app.api.auth import router as auth_router
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,6 +71,49 @@ async def _limit_upload_size(request: Request, call_next):
     )
   return await call_next(request)
 
+
+@app.middleware("http")
+async def _require_auth(request: Request, call_next):
+  """Protect all /api routes except /api/auth/* and /api/health.
+
+  Accepts `Authorization: Bearer <token>` or `X-Auth-Token: <token>`.
+  Sets request.state.user_id on success so endpoints can identify the user.
+  """
+  path = request.url.path
+  is_auth_endpoint = path.startswith("/api/auth") and path != "/api/auth/me"
+  if path.startswith("/api") and not is_auth_endpoint and path != "/api/health":
+    from app.api.auth import verify_token
+    token = (request.headers.get("authorization") or "").strip()
+    if token.lower().startswith("bearer "):
+      token = token[7:].strip()
+    if not token:
+      token = (request.headers.get("x-auth-token") or "").strip()
+    user_id = verify_token(token)
+    if user_id is None:
+      return JSONResponse(status_code=401, content={"detail": "未登录或登录已过期"})
+    request.state.user_id = user_id
+  return await call_next(request)
+
+
+@app.middleware("http")
+async def _mirror_api_key(request: Request, call_next):
+  """Persist the per-request API key server-side (best effort).
+
+  The frontend sends the user's key on every request via X-API-Key. Background
+  jobs (Feishu auto-sync re-vectorization) have no request context, so the first
+  time we see a key we also store it in llm_config_store. This makes background
+  embedding work regardless of which domain the user opened the app from.
+  """
+  key = (request.headers.get("x-api-key") or "").strip()
+  if key:
+    try:
+      from app.storage import llm_config_store as _lcs
+      if not _lcs.get_api_key():
+        _lcs.update_config({"api_key": key})
+    except Exception:
+      pass
+  return await call_next(request)
+
 app.include_router(health_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
@@ -79,6 +123,7 @@ app.include_router(sessions_router, prefix="/api")
 app.include_router(custom_models_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 # ---- Serve frontend static files (for 花生壳 / production) ----
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"

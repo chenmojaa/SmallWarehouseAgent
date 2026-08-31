@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NCard, NTag, NText, NButton } from 'naive-ui'
 import type { Citation } from '@/api/chat'
 
-defineProps<{
+const props = defineProps<{
   citation: Citation
   index: number
 }>()
@@ -10,6 +11,20 @@ defineProps<{
 const emit = defineEmits<{
   close: []
 }>()
+
+function sourceLabel(type?: string): string {
+  if (!type) return '上传文件'
+  if (type.startsWith('feishu_')) return '飞书文档'
+  if (type === 'url') return '网页'
+  if (type === 'text') return '文本'
+  return '上传文件'
+}
+
+const sourceTagType = computed(() => {
+  const t = props.citation.source_type || ''
+  if (t.startsWith('feishu_')) return 'success' as const
+  return 'default' as const
+})
 </script>
 
 <template>
@@ -17,6 +32,7 @@ const emit = defineEmits<{
     <div class="cp-head">
       <n-tag size="small" :bordered="false">[{{ index }}]</n-tag>
       <n-text strong style="font-size: 12px">{{ citation.title || citation.note_id }}</n-text>
+      <n-tag size="tiny" :bordered="false" :type="sourceTagType">{{ sourceLabel(citation.source_type) }}</n-tag>
       <n-text depth="3" style="font-size: 11px; margin-left: auto">
         chunk #{{ citation.chunk_index }}
         <span v-if="citation.score !== undefined"> · score {{ citation.score.toFixed(3) }}</span>
