@@ -31,12 +31,36 @@ export function listInstalledSkills(): Promise<{ items: InstalledSkill[] }> {
   return get('/skills')
 }
 
+export interface SkillDetail extends InstalledSkill {
+  content: string
+  files: string[]
+}
+
+export function getSkillDetail(id: string): Promise<SkillDetail> {
+  return get(`/skills/${encodeURIComponent(id)}/detail`)
+}
+
 export function installRecommendedSkill(id: string): Promise<InstalledSkill> {
   return postJson(`/skills/install/${encodeURIComponent(id)}`, {})
 }
 
 export function removeInstalledSkill(id: string) {
   return deleteReq(`/skills/${encodeURIComponent(id)}`)
+}
+
+/** 下载已安装技能的 zip 包（携带登录 token） */
+export async function downloadSkill(id: string): Promise<void> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(id)}/download`, {
+    headers: { ...authTokenHeaders() },
+  })
+  if (!response.ok) throw new Error(await response.text())
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `${id}.zip`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function uploadSkillFiles(files: File[], sourceName?: string): Promise<{ items: InstalledSkill[] }> {

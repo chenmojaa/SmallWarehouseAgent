@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.request import urlopen
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 
 from app.config import settings
 
@@ -274,6 +274,24 @@ def list_skills():
     return {"items": sorted(_load_installed(), key=lambda item: item["installed_at"], reverse=True)}
 
 
+@router.get("/{skill_id}/detail")
+def skill_detail(skill_id: str):
+    """Installed skill detail: record + SKILL.md content + file tree."""
+    record = next((item for item in _load_installed() if item["id"] == skill_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    directory = Path(record.get("path", ""))
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="技能目录已丢失")
+    manifest_path = directory / "SKILL.md"
+    content = manifest_path.read_text(encoding="utf-8-sig", errors="replace") if manifest_path.exists() else ""
+    files: list[str] = []
+    for item in sorted(directory.rglob("*")):
+        if item.is_file():
+            files.append(str(item.relative_to(directory)).replace("\\", "/"))
+    return {**record, "content": content, "files": files[:500]}
+
+
 @router.post("/upload")
 async def upload_skill(files: list[UploadFile] = File(...), source_name: str = "uploaded-skill"):
     if not files:
@@ -352,6 +370,29 @@ def install_recommended(skill_id: str):
         raise HTTPException(status_code=502, detail=f"下载或解压失败：{error}") from error
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+@router.get("/{skill_id}/download")
+def download_skill(skill_id: str):
+    """把已安装技能目录打包为 zip 下载。"""
+    record = next((item for item in _load_installed() if item["id"] == skill_id), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    directory = Path(record.get("path", ""))
+    if not directory.is_dir():
+        raise HTTPException(status_code=404, detail="技能目录已丢失")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in sorted(directory.rglob("*")):
+            if item.is_file():
+                archive.write(item, item.relative_to(directory).as_posix())
+    buffer.seek(0)
+    filename = f"{skill_id}.zip"
+    return Response(
+        content=buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/{skill_id}")

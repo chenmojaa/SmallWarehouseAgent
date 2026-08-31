@@ -64,5 +64,11 @@ _*.json
 _*.png
 _*.log
 
+# IDE / local working directories
+.trae/
+.cursor/
+.idea/
+.vscode/
+
 # Debug screenshots from manual UI testing
 test-*.png

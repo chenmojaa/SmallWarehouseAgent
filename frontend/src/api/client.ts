@@ -2,6 +2,8 @@ const BASE = "/api"
 const KEY_STORAGE = "second_brain_api_key"
 const TOKEN_KEY = "hd_auth_token"
 
+import { markLoggedOut } from "@/router"
+
 export function getApiKey(): string {
   try { return localStorage.getItem(KEY_STORAGE) || "" }
   catch { return "" }
@@ -16,7 +18,7 @@ export function setApiKey(k: string) {
 
 /** 401 时清除登录态并跳转登录页（已在登录页时不重复跳转） */
 function handleUnauthorized() {
-  try { localStorage.removeItem(TOKEN_KEY) } catch {}
+  markLoggedOut()
   if (window.location.pathname !== "/login") {
     window.location.href = "/login"
   }

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { markAuthed, markLoggedOut } from '@/router'
 
 const TOKEN_KEY = 'hd_auth_token'
 const PHONE_KEY = 'hd_auth_phone'
@@ -20,6 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem(TOKEN_KEY, t)
       localStorage.setItem(PHONE_KEY, p)
     } catch {}
+    markAuthed()
   }
 
   function logout() {
@@ -29,6 +31,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(PHONE_KEY)
     } catch {}
+    markLoggedOut()
   }
 
   return { token, phone, isLoggedIn, setAuth, logout }
