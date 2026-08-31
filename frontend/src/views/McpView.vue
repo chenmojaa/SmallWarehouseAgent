@@ -69,7 +69,7 @@ async function loadData() {
     servers.value = serverResult.items
     presets.value = presetResult.items
   } catch (error) {
-    errorMessage.value = (error && (error as Error).message) || String(error) || '加载失败'
+    errorMessage.value = String((error as Error)?.message || error || '加载失败')
   } finally {
     loading.value = false
   }
@@ -102,7 +102,7 @@ async function saveServer() {
     editorOpen.value = false
     await loadData()
   } catch (error) {
-    message.error((error && (error as Error).message) || String(error) || '保存失败')
+    message.error(String((error as Error)?.message || error || '保存失败'))
   } finally {
     saving.value = false
   }
@@ -114,24 +114,24 @@ async function installPreset(preset: MCPPreset) {
     const msg = result.created ? ('已添加 ' + preset.name) : (preset.name + ' 已在列表中')
     message[result.created ? 'success' : 'info'](msg)
     await loadData()
-  } catch (error) { message.error((error && (error as Error).message) || String(error) || '安装失败') }
+  } catch (error) { message.error(String((error as Error)?.message || error || '安装失败')) }
 }
 
 async function toggleServer(server: MCPServer, enabled: boolean) {
   try { await updateMcpServer(server.id, { enabled }); server.enabled = enabled; message.info(enabled ? '已启用 MCP' : '已停用 MCP') }
-  catch (error) { message.error((error && (error as Error).message) || String(error) || '更新失败') }
+  catch (error) { message.error(String((error as Error)?.message || error || '更新失败')) }
 }
 
 async function testServer(server: MCPServer) {
   testingId.value = server.id
   try { const result = await testMcpServer(server.id); message[result.ok ? 'success' : 'warning'](result.message); await loadData() }
-  catch (error) { message.error((error && (error as Error).message) || String(error) || '测试失败') }
+  catch (error) { message.error(String((error as Error)?.message || error || '测试失败')) }
   finally { testingId.value = '' }
 }
 
 async function removeServer(server: MCPServer) {
   try { await deleteMcpServer(server.id); message.info('MCP 已删除'); await loadData() }
-  catch (error) { message.error((error && (error as Error).message) || String(error) || '删除失败') }
+  catch (error) { message.error(String((error as Error)?.message || error || '删除失败')) }
 }
 
 function statusType(server: MCPServer) {
@@ -409,33 +409,80 @@ const readyCount = computed(() => enabledCount.value + (presets.value?.length ||
     </n-spin>
 
     <n-modal v-model:show='editorOpen' preset='card' :title='editingId ? "编辑 MCP" : "添加 MCP"' class='mcp-editor' :bordered='false' size='huge'>
-      <div class='editor-grid'>
-        <section class='editor-col'>
-          <h4>基本信息</h4>
-          <n-input v-model:value='form.name' placeholder='名称，例如：本地文件' />
-          <n-input v-model:value='form.description' type='textarea' :autosize='{ minRows: 2, maxRows: 4 }' placeholder='用途说明（可选）' />
+      <div class='editor-body'>
+        <!-- Section 1: Basic Info -->
+        <section class='editor-section'>
+          <div class='section-header'>
+            <span class='section-icon'>📋</span>
+            <h4>基本信息</h4>
+          </div>
+          <div class='field-group'>
+            <div class='field'>
+              <label class='field-label'>服务名称</label>
+              <n-input v-model:value='form.name' placeholder='例如：本地文件助手' class='editor-input' />
+            </div>
+            <div class='field'>
+              <label class='field-label'>用途说明 <span class='optional'>（可选）</span></label>
+              <n-input v-model:value='form.description' type='textarea' :autosize='{ minRows: 2, maxRows: 3 }' placeholder='简要描述这个 MCP 的用途' class='editor-input' />
+            </div>
+          </div>
         </section>
-        <section class='editor-col'>
-          <h4>传输方式</h4>
-          <n-select v-model:value='form.transport' :options='transportOptions' />
-          <n-input v-if='form.transport === "stdio"' v-model:value='form.command' placeholder='启动命令，例如：npx' />
-          <n-input v-if='form.transport === "http"' v-model:value='form.url' placeholder='http://127.0.0.1:3000/mcp' />
+
+        <!-- Section 2: Transport -->
+        <section class='editor-section'>
+          <div class='section-header'>
+            <span class='section-icon'>🔌</span>
+            <h4>传输方式</h4>
+          </div>
+          <div class='transport-toggle'>
+            <button class='transport-btn' :class='{ active: form.transport === "stdio" }' type='button' @click='form.transport = "stdio"'>
+              <span class='transport-icon'>⌨️</span>
+              <span class='transport-name'>stdio</span>
+              <span class='transport-desc'>命令行</span>
+            </button>
+            <button class='transport-btn' :class='{ active: form.transport === "http" }' type='button' @click='form.transport = "http"'>
+              <span class='transport-icon'>🌐</span>
+              <span class='transport-name'>http</span>
+              <span class='transport-desc'>SSE / Streamable</span>
+            </button>
+          </div>
+          <div class='field'>
+            <label v-if='form.transport === "stdio"' class='field-label'>启动命令</label>
+            <label v-else class='field-label'>服务地址</label>
+            <n-input v-if='form.transport === "stdio"' v-model:value='form.command' placeholder='例如：npx / uvx / python' class='editor-input' />
+            <n-input v-else v-model:value='form.url' placeholder='http://127.0.0.1:3000/mcp' class='editor-input' />
+          </div>
         </section>
-        <section class='editor-col'>
-          <h4>启动参数</h4>
-          <n-input v-if='form.transport === "stdio"' v-model:value='argsText' type='textarea' :autosize='{ minRows: 3, maxRows: 8 }' placeholder='JSON 字符串数组，例如：["-y","@scope/server"]' />
-          <p v-else class='editor-hint'>HTTP 模式无需 args。</p>
-        </section>
-        <section class='editor-col'>
-          <h4>环境变量</h4>
-          <n-input v-model:value='envText' type='textarea' :autosize='{ minRows: 3, maxRows: 8 }' placeholder='JSON 对象，例如：{"TOKEN": "xxx"}' />
+
+        <!-- Section 3: Args & Env -->
+        <section class='editor-section'>
+          <div class='section-header'>
+            <span class='section-icon'>️</span>
+            <h4>高级配置</h4>
+          </div>
+          <div class='field-group'>
+            <div class='field'>
+              <label class='field-label'>启动参数 <span class='optional'>（JSON 数组）</span></label>
+              <n-input v-if='form.transport === "stdio"' v-model:value='argsText' type='textarea' :autosize='{ minRows: 2, maxRows: 5 }' placeholder='["-y", "@modelcontextprotocol/server-filesystem"]' class='editor-input mono' />
+              <div v-else class='field-hint-box'>
+                <span class='field-hint-icon'>💡</span>
+                <span>HTTP 模式无需启动参数</span>
+              </div>
+            </div>
+            <div class='field'>
+              <label class='field-label'>环境变量 <span class='optional'>（JSON 对象）</span></label>
+              <n-input v-model:value='envText' type='textarea' :autosize='{ minRows: 2, maxRows: 5 }' placeholder='{"API_KEY": "sk-xxx"}' class='editor-input mono' />
+            </div>
+          </div>
         </section>
       </div>
       <template #footer>
-        <n-space justify='end'>
+        <div class='editor-footer'>
           <n-button quaternary @click='editorOpen = false'>取消</n-button>
-          <n-button type='primary' :loading='saving' @click='saveServer'>保存</n-button>
-        </n-space>
+          <n-button type='primary' :loading='saving' @click='saveServer'>
+            {{ editingId ? '更新配置' : '添加服务' }}
+          </n-button>
+        </div>
       </template>
     </n-modal>
   </div>
@@ -521,11 +568,33 @@ const readyCount = computed(() => enabledCount.value + (presets.value?.length ||
 .server-config { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 9px; border-radius: 8px; background: var(--hover-bg); color: var(--text-secondary); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin-bottom: 8px; }
 .server-meta { color: var(--text-muted); font-size: 11px; }
 .server-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.mcp-editor { width: min(760px, calc(100vw - 32px)); }
-.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 22px; }
-.editor-col { display: flex; flex-direction: column; gap: 10px; }
-.editor-col h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-muted); font-weight: 600; }
-.editor-hint { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--hover-bg); color: var(--text-muted); font-size: 12px; }
+.mcp-editor { width: min(720px, calc(100vw - 32px)); }
+.mcp-editor :deep(.n-card-header) { padding-bottom: 4px; }
+.mcp-editor :deep(.n-card-header__main) { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.editor-body { display: flex; flex-direction: column; gap: 20px; }
+.editor-section { padding: 16px 18px; border-radius: 14px; border: 1px solid var(--border-soft); background: var(--bg-elevated); }
+.section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.section-header h4 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.section-icon { font-size: 16px; }
+.field-group { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.02em; }
+.field-label .optional { font-weight: 400; color: var(--text-muted); }
+.editor-input :deep(.n-input) { border-radius: 10px; }
+.editor-input :deep(.n-input .n-input__border),
+.editor-input :deep(.n-input .n-input__state-border) { border-radius: 10px; }
+.editor-input.mono :deep(textarea) { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 13px; }
+.field-hint-box { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--hover-bg); color: var(--text-muted); font-size: 13px; }
+.field-hint-icon { font-size: 14px; }
+.transport-toggle { display: flex; gap: 10px; margin-bottom: 14px; }
+.transport-btn { flex: 1; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; border: 1.5px solid var(--border-soft); background: var(--bg-app); cursor: pointer; transition: all 0.2s; }
+.transport-btn:hover { border-color: var(--brand-blue); background: var(--hover-bg); }
+.transport-btn.active { border-color: var(--brand-blue); background: rgba(59, 130, 246, 0.08); }
+.transport-icon { font-size: 18px; }
+.transport-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.transport-desc { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+.editor-footer { display: flex; justify-content: flex-end; gap: 10px; }
+.editor-footer :deep(.n-button) { border-radius: 10px; }
 @media (max-width: 920px) { .hero { padding: 22px 22px 26px; } .hero-stats { grid-template-columns: 1fr 1fr; } .hero-quick { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .mcp-page { padding: 0 14px 30px; } .hero-stats { grid-template-columns: 1fr; } .preset-grid { grid-template-columns: 1fr; } }
 </style>

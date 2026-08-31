@@ -63,13 +63,34 @@ def _generate_meta(content: str, fallback_title: str, chat) -> IngestMeta:
         meta = structured.invoke(prompt)
         if not meta.title:
             meta.title = fallback_title[:30]
+        # Decode any leftover \uXXXX escape sequences the LLM may have returned
+        # literally (e.g. "\u6587\u4ef6" instead of "文件").
+        meta.title = _decode_unicode_escapes(meta.title)
         meta.tags = [t.strip() for t in (meta.tags or []) if t and t.strip()][:5]
+        meta.tags = [_decode_unicode_escapes(t) for t in meta.tags]
         if not meta.summary:
             meta.summary = head[:60]
+        meta.summary = _decode_unicode_escapes(meta.summary)
         return meta
     except Exception as e:
         _log.warning("ingest: meta generation failed: %s", e)
         return IngestMeta(title=fallback_title[:30], tags=[], summary=head[:60])
+
+
+def _decode_unicode_escapes(s: str) -> str:
+    """Replace literal \\uXXXX sequences with the actual Unicode characters.
+
+    Some LLMs return JSON string values with escaped Unicode (e.g. the title
+    field literally contains ``\\u6587\\u4ef6`` instead of ``文件``).  This
+    helper decodes those sequences so the stored title is human-readable.
+    """
+    def _repl(m):
+        try:
+            return chr(int(m.group(1), 16))
+        except (ValueError, OverflowError):
+            return m.group(0)
+    import re
+    return re.sub(r'\\u([0-9a-fA-F]{4})', _repl, s)
 
 
 def _check_duplicate(title: str, summary: str) -> int | None:

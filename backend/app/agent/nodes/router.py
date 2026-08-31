@@ -58,6 +58,7 @@ rewritten_query rules:
 - combine the latest user message with up to 3 prior turns, expanding pronouns
   ("it" / "this" / "that one above") into a complete standalone sentence
 - output ONLY the rewritten question itself, do NOT answer it
+- keep the rewritten query in the SAME language as the user's latest message
 
 Example:
 History: [user] What is the origin of the Bull Demon King? [assistant] The Bull Demon King is...

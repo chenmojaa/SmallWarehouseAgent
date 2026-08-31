@@ -147,7 +147,14 @@ const ACCEPT = '.pdf,.docx,.pptx,.xlsx,.csv,.html,.htm,.txt,.md,.markdown,.png,.
 function matchKeyword(title: string, summary?: string) {
   const query = keyword.value.trim().toLowerCase()
   if (!query) return true
-  return title.toLowerCase().includes(query) || (summary || '').toLowerCase().includes(query)
+  const t = decodeUnicode(title)
+  const s = decodeUnicode(summary || '')
+  return t.toLowerCase().includes(query) || s.toLowerCase().includes(query)
+}
+
+function decodeUnicode(s: string): string {
+  if (!s) return s
+  return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
 }
 
 const visibleFeishuNotes = computed(() => notes.items
@@ -381,12 +388,12 @@ function openExternal(url?: string | null) {
           <article v-for="note in visibleFeishuNotes" :key="note.id" class="note-item">
             <div class="note-main">
               <div class="note-title-row">
-                <strong>{{ note.title }}</strong>
+                <strong>{{ decodeUnicode(note.title) }}</strong>
                 <n-tag size="small" round :type="sourceTone(note.source_type) as any">{{ sourceLabel(note.source_type) }}</n-tag>
                 <n-tag v-if="note.embedded" size="small" round :bordered="false">{{ note.chunk_count }} 块</n-tag>
                 <n-tag v-else size="small" round type="warning">待索引</n-tag>
               </div>
-              <p v-if="note.summary">{{ note.summary }}</p>
+              <p v-if="note.summary">{{ decodeUnicode(note.summary) }}</p>
             </div>
             <div class="note-actions">
               <span>{{ formatDate(note.created_at) }}</span>
@@ -418,15 +425,15 @@ function openExternal(url?: string | null) {
       <n-empty v-else-if="visibleLocalNotes.length === 0" description="还没有本地知识内容" />
       <div v-else class="note-list">
         <article v-for="note in visibleLocalNotes" :key="note.id" class="note-item">
-          <div class="note-main">
-            <div class="note-title-row">
-              <strong>{{ note.title }}</strong>
-              <n-tag size="small" round :type="sourceTone(note.source_type) as any">{{ sourceLabel(note.source_type) }}</n-tag>
-              <n-tag v-if="note.embedded" size="small" round :bordered="false">{{ note.chunk_count }} 块</n-tag>
-              <n-tag v-else size="small" round type="warning">待索引</n-tag>
+            <div class="note-main">
+              <div class="note-title-row">
+                <strong>{{ decodeUnicode(note.title) }}</strong>
+                <n-tag size="small" round :type="sourceTone(note.source_type) as any">{{ sourceLabel(note.source_type) }}</n-tag>
+                <n-tag v-if="note.embedded" size="small" round :bordered="false">{{ note.chunk_count }} 块</n-tag>
+                <n-tag v-else size="small" round type="warning">待索引</n-tag>
+              </div>
+              <p v-if="note.summary">{{ decodeUnicode(note.summary) }}</p>
             </div>
-            <p v-if="note.summary">{{ note.summary }}</p>
-          </div>
           <div class="note-actions">
             <span>{{ formatDate(note.created_at) }}</span>
             <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">打开</button>

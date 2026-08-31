@@ -25,13 +25,22 @@ const sourceTagType = computed(() => {
   if (t.startsWith('feishu_')) return 'success' as const
   return 'default' as const
 })
+
+/** 解码 LLM 可能返回的 \uXXXX 转义序列（如 "\u6587\u4ef6" → "文件"） */
+function decodeUnicode(s: string): string {
+  if (!s) return s
+  return s.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+}
+
+const displayTitle = computed(() => decodeUnicode(props.citation.title || props.citation.note_id || ''))
+const displaySnippet = computed(() => decodeUnicode(props.citation.snippet || ''))
 </script>
 
 <template>
   <n-card size="small" :bordered="false" class="citation-preview">
     <div class="cp-head">
       <n-tag size="small" :bordered="false">[{{ index }}]</n-tag>
-      <n-text strong style="font-size: 12px">{{ citation.title || citation.note_id }}</n-text>
+      <n-text strong style="font-size: 12px">{{ displayTitle }}</n-text>
       <n-tag size="tiny" :bordered="false" :type="sourceTagType">{{ sourceLabel(citation.source_type) }}</n-tag>
       <n-text depth="3" style="font-size: 11px; margin-left: auto">
         chunk #{{ citation.chunk_index }}
@@ -46,7 +55,7 @@ const sourceTagType = computed(() => {
         </template>
       </n-button>
     </div>
-    <n-text depth="2" class="cp-snippet">{{ citation.snippet }}</n-text>
+    <n-text depth="2" class="cp-snippet">{{ displaySnippet }}</n-text>
   </n-card>
 </template>
 

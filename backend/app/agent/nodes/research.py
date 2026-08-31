@@ -24,7 +24,7 @@ FOLLOWUP_PROMPT = """You are a research assistant. You have already gathered the
 
 <<COLLECTED>>
 
-Original question: <<ORIG
+Original question: <<ORIG>>
 
 Suggest ONE follow-up search query (in the SAME language as the original question, in a complete sentence) that would help find the missing angle. Output ONLY the query, no preamble."""
 

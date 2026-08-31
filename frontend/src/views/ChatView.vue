@@ -127,7 +127,12 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
-          <template v-if="!(chat.streamingHere && m.id === chat.streamingMessageId && (!m.content.trim() || chat.thinking))">
+          <!-- Render the bubble as soon as ANY content exists (including a
+               partial <think> block) so the collapsible thinking section is
+               visible and live-updating during the whole stream. The
+               ThinkingIndicator placeholder only covers the empty-content
+               gap before the first token arrives. -->
+          <template v-if="!(chat.streamingHere && m.id === chat.streamingMessageId && !m.content.trim())">
             <MessageBubble
               :role="m.role"
               :content="m.content"

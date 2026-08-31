@@ -65,9 +65,12 @@ async function syncThinkOpenState(): Promise<void> {
 //    <think> blocks are still stripped from the main body to keep the rest
 //    of the pipeline unchanged.
 function splitThink(s: string): { think: string; rest: string } {
-  const m = s.match(/^\s*<think>([\s\S]*?)<\/think>([\s\S]*)$/i)
+  // Match leading <think>... block. The closing </think> is optional because
+  // during streaming the tag may not be closed yet — we still want to show
+  // whatever thinking content has arrived so far.
+  const m = s.match(/^\s*<think>([\s\S]*?)(?:<\/think>([\s\S]*))?\s*$/i)
   if (m) {
-    return { think: m[1].trim(), rest: m[2] }
+    return { think: m[1].trim(), rest: (m[2] || '').trim() }
   }
   const cleaned = s.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trim()
   return { think: '', rest: cleaned }

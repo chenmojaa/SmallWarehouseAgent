@@ -96,11 +96,13 @@ export const useChatStore = defineStore("chat", {
       const reasoning = sel?.reasoning
       const embeddingModel = sel?.embeddingModel
 
-      // Stream-time <think> state machine: avoids re-scanning the full
-      // accumulated text on every token. The previous version ran 3 regex
-      // passes over the whole buffer per delta, which scaled badly with
-      // long answers.
+      // Stream-time <think> state machine: preserves think content (not just
+      // visible text) so MessageBubble can render the collapsible thinking
+      // section during streaming — previously the think text was discarded
+      // and only appeared after navigating away and back (when the full
+      // content was reloaded from the backend).
       let visible = ''
+      let thinkBuf = ''
       let inThink = false
 
       const feed = (raw: string): void => {
@@ -120,10 +122,12 @@ export const useChatStore = defineStore("chat", {
           } else {
             const close = s.indexOf('</think>')
             if (close === -1) {
-              // Still inside <think>; flush whatever we have on next delta
-              // or on `done` (which will trim any tail that never closed).
+              // Still inside <think>; accumulate and wait for next delta.
+              thinkBuf += s
+              s = ''
               return
             }
+            thinkBuf += s.slice(0, close)
             s = s.slice(close + 8)
             if (inThink) this.thinking = false
             inThink = false
@@ -132,7 +136,10 @@ export const useChatStore = defineStore("chat", {
       }
 
       const flushBubble = (): void => {
-        asstMsg.content = visible.trimEnd()
+        // Prepend the accumulated thinking block so MessageBubble's
+        // splitThink() can extract it and render the collapsible section.
+        const thinkBlock = thinkBuf ? '<think>\n' + thinkBuf + '\n</think>\n' : ''
+        asstMsg.content = (thinkBlock + visible).trimEnd()
         const idx = this.messages.findIndex(m => m.id === asstMsg.id)
         if (idx >= 0) this.messages[idx] = { ...asstMsg }
       }
@@ -182,9 +189,8 @@ export const useChatStore = defineStore("chat", {
               // LLM ended without ever emitting a </think>; close it out so
               // the placeholder doesn't keep flashing "思考中..." forever.
               this.thinking = false
-              visible = visible.replace(/<think>[\s\S]*$/, '')
-              flushBubble()
             }
+            flushBubble()
             break
           }
         }
