@@ -505,6 +505,7 @@ function sourceLabel(skill: InstalledSkill) {
 }
 .new-chat-btn {
   font-weight: 600;
+  border-radius: 12px !important;
 }
 .new-chat-btn:hover {
   background: var(--active-bg) !important;
