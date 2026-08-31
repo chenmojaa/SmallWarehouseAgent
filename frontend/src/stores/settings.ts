@@ -61,7 +61,7 @@ export const useSettingsStore = defineStore('settings', {
       try {
         this.info = await listModels()
       } catch (e) {
-        this.error = (e as Error).message
+        this.error = (e as Error)?.message || String(e)
       } finally {
         this.loading = false
       }

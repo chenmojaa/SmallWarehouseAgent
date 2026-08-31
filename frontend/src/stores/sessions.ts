@@ -31,7 +31,7 @@ export const useSessionsStore = defineStore("sessions", {
         localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(this.items))
       }
       catch (e) {
-        this.error = (e as Error).message
+        this.error = (e as Error)?.message || String(e)
         const cached = readSessionsCache()
         if (cached.length > 0) this.items = cached
       }

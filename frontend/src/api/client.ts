@@ -14,7 +14,7 @@ export function setApiKey(k: string) {
   } catch {}
 }
 
-/** 401 时清除登录态并跳转登录页（避免在登录页死循环） */
+/** 401 时清除登录态并跳转登录页（已在登录页时不重复跳转） */
 function handleUnauthorized() {
   try { localStorage.removeItem(TOKEN_KEY) } catch {}
   if (window.location.pathname !== "/login") {
