@@ -101,9 +101,20 @@ const validSourceTokens = computed<number[]>(() => {
   return sourceTokens.value.filter(n => n >= 1 && n <= max)
 })
 
-// 3) Belt-and-suspenders: strip any stray [n] markers the LLM may still have
-//    left inline in the body.
-const bodyNoCite = computed(() => body.value.replace(/\[\s*\d+\s*\]/g, ''))
+// 3) Replace inline [n] markers with clickable citation buttons so the
+//    user can tap them directly in the answer text (instead of having
+//    them silently stripped). The buttons share the same toggle() handler
+//    as the footer source-line buttons.
+function replaceCiteMarkers(s: string): string {
+  return s.replace(/\[\s*(\d+)\s*\]/g, (_m, nStr: string) => {
+    const n = parseInt(nStr, 10)
+    const cites = props.citations
+    if (!cites || cites.length === 0) return ''
+    if (n < 1 || n > cites.length) return ''
+    return `<span class="cite-inline" data-cite="${n}" title="查看来源 [${n}]">[${n}]</span>`
+  })
+}
+const bodyNoCite = computed(() => replaceCiteMarkers(body.value))
 
 // 4) Markdown -> HTML via marked, with a custom renderer for ```mermaid blocks.
 function escapeHtml(s: string): string {
@@ -144,10 +155,25 @@ const renderedHtml = computed(() => {
   if (props.role !== 'assistant') return ''
   const raw = md.parse(bodyNoCite.value, { async: false }) as string
   return DOMPurify.sanitize(raw, {
-    ADD_ATTR: ['data-source', 'data-rendered', 'class'],
+    ADD_ATTR: ['data-source', 'data-rendered', 'class', 'data-cite', 'title'],
     ADD_TAGS: ['span'],
   })
 })
+
+// 事件委托：点击内联 [n] 引用按钮时高亮对应来源
+let mdBodyClickHandler: ((e: MouseEvent) => void) | null = null
+function bindMdBodyClick(): void {
+  const el = bubbleEl.value
+  if (!el) return
+  if (mdBodyClickHandler) el.removeEventListener('click', mdBodyClickHandler)
+  mdBodyClickHandler = (e: MouseEvent) => {
+    const target = (e.target as HTMLElement).closest('.cite-inline') as HTMLElement | null
+    if (!target) return
+    const n = parseInt(target.getAttribute('data-cite') || '', 10)
+    if (!isNaN(n)) toggle(n)
+  }
+  el.addEventListener('click', mdBodyClickHandler)
+}
 
 function toggle(n: number): void {
   if (props.activeIndex === n) emit('update:activeIndex', -1)
@@ -186,8 +212,14 @@ async function refreshMermaid(): Promise<void> {
   if (bubbleEl.value) await renderMermaidIn(bubbleEl.value)
 }
 
-onMounted(refreshMermaid)
-watch(renderedHtml, refreshMermaid)
+onMounted(() => {
+  refreshMermaid()
+  bindMdBodyClick()
+})
+watch(renderedHtml, () => {
+  refreshMermaid()
+  bindMdBodyClick()
+})
 // Restore + persist thinking open/close. flush:'post' ensures detailsRef is
 // populated (the v-if element exists) by the time we read it.
 watch([think, detailsRef], () => {
@@ -406,5 +438,29 @@ onBeforeUnmount(() => {
   background: var(--accent, #3b82f6);
   color: #fff;
   text-decoration: none;
+}
+
+/* 内联引用 [n] 标记：正文中直接显示的小圆角徽章 */
+.cite-inline {
+  display: inline-block;
+  padding: 0 5px;
+  margin: 0 1px;
+  font-size: 0.85em;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.10);
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: baseline;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.cite-inline:hover {
+  background: rgba(59, 130, 246, 0.22);
+}
+.cite-inline.active {
+  background: var(--accent, #3b82f6);
+  color: #fff;
 }
 </style>

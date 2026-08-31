@@ -50,20 +50,26 @@ def _build_messages(state: AgentState):
 
 
 def _citations_from_text(text: str, chunks: list) -> list:
-  """Extract cited chunks in first-seen order from `[n]` markers.
+  """Extract cited chunks from `[n]` markers, returned in index order.
 
-  Bad indices and out-of-range references are silently skipped so a stray
-  bracket in the LLM's prose cannot poison the citations card.
+  The frontend expects citations[n-1] to correspond to the [n] marker, so
+  the array must be sorted by chunk index (not by first-seen order). Bad
+  indices and out-of-range references are silently skipped.
   """
   if not text or not chunks:
     return []
   seen: set = set()
-  out: list = []
+  indices: list[int] = []
   for m in _CITE_RE.finditer(text):
     idx = int(m.group(1)) - 1
     if idx < 0 or idx >= len(chunks) or idx in seen:
       continue
     seen.add(idx)
+    indices.append(idx)
+  # Sort by index so citations[n-1] always matches the [n] marker.
+  indices.sort()
+  out: list = []
+  for idx in indices:
     c = chunks[idx]
     out.append({
       "note_id": c.get("note_id"),

@@ -26,7 +26,7 @@ _DEFAULTS = {
     "\n"
     "Rules:\n"
     "1. Use only the reference chunks; never fabricate facts.\n"
-    "2. Cite sources by index [n] matching the reference index below.\n"
+    "2. Cite sources by index [n] matching the reference index below. Insert [n] markers inline in the body text right after the sentence or clause that draws from that source.\n"
     "3. If the reference material is insufficient, say so explicitly.\n"
     "4. Keep the answer concise.\n"
     "\n"
@@ -34,9 +34,9 @@ _DEFAULTS = {
     "- Use Markdown for structure (bold, lists, headings, code blocks, tables).\n"
     "- For flowcharts / sequence / class diagrams, use a fenced ```mermaid block.\n"
     "- For images, use Markdown image syntax ![alt](url).\n"
-    "- Citations: collect every [n] you reference into ONE trailing line at the very end:\n"
+    "- Citations: also collect every [n] you reference into ONE trailing line at the very end:\n"
     "    来源：[n][m]...\n"
-    "  listing each unique reference exactly once. Do NOT embed [n] markers inside body sentences or list items.\n"
+    "  listing each unique reference exactly once.\n"
     "\n"
     "Reference material:\n"
     "<<CONTEXT>>\n"
@@ -48,17 +48,24 @@ _DEFAULTS = {
 
 _CONFIG_PATH = Path(__file__).parent / "config.yaml"
 _CACHE: Optional[dict] = None
+_CACHE_MTIME: float = 0.0
 
 
 def load_prompts(force_reload: bool = False) -> dict:
   """Return the merged prompt set.
 
   Merges _DEFAULTS with whatever parses out of config.yaml; YAML keys win
-  over defaults but missing YAML keys fall back. Result is cached after
-  first call; pass force_reload=True to re-read the file (handy in tests).
+  over defaults but missing YAML keys fall back. Result is cached but
+  automatically invalidated when config.yaml is modified on disk (mtime
+  check), so editing the YAML takes effect on the next request without
+  a restart. Pass force_reload=True to bypass the cache entirely.
   """
-  global _CACHE
-  if _CACHE is not None and not force_reload:
+  global _CACHE, _CACHE_MTIME
+  try:
+    mtime = _CONFIG_PATH.stat().st_mtime
+  except OSError:
+    mtime = 0.0
+  if _CACHE is not None and not force_reload and mtime <= _CACHE_MTIME:
     return _CACHE
   merged = dict(_DEFAULTS)
   if _CONFIG_PATH.exists():
