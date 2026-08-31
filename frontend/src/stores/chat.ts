@@ -321,5 +321,40 @@ export const useChatStore = defineStore("chat", {
       const i = this.messages.findIndex(m => m.id === msgId)
       if (i >= 0) this.messages[i] = { ...this.messages[i], activeCitationIndex: idx }
     },
+    /** 删除一条消息（及其配对消息） */
+    deleteMessage(msgId: string) {
+      const i = this.messages.findIndex(m => m.id === msgId)
+      if (i < 0) return
+      const msg = this.messages[i]
+      // 删用户消息时连带后面的 assistant；删 assistant 时连带前面的 user
+      if (msg.role === 'user' && i + 1 < this.messages.length && this.messages[i + 1].role === 'assistant') {
+        this.messages.splice(i, 2)
+      } else if (msg.role === 'assistant' && i > 0 && this.messages[i - 1].role === 'user') {
+        this.messages.splice(i - 1, 2)
+      } else {
+        this.messages.splice(i, 1)
+      }
+    },
+    /** 重新生成：删除最后一条 assistant，用其前一条 user 重新发送 */
+    async regenerate() {
+      if (this.isStreaming) return
+      const last = this.messages[this.messages.length - 1]
+      if (!last || last.role !== 'assistant') return
+      const prev = this.messages[this.messages.length - 2]
+      if (!prev || prev.role !== 'user') return
+      this.messages.pop() // 删掉这条 assistant
+      const text = prev.content
+      await this.send(text)
+    },
+    /** 回退：删除最后一条 user + assistant */
+    undoLast() {
+      if (this.isStreaming) return
+      const n = this.messages.length
+      if (n >= 2 && this.messages[n - 1].role === 'assistant' && this.messages[n - 2].role === 'user') {
+        this.messages.splice(n - 2, 2)
+      } else if (n >= 1) {
+        this.messages.pop()
+      }
+    },
   },
 })

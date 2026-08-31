@@ -20,6 +20,28 @@ const route = useRoute()
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
 
+// === 消息操作 ===
+const clickedAct = ref('')
+let clickedTimer: number | undefined
+function flashAct(name: string) {
+  clickedAct.value = name
+  if (clickedTimer) window.clearTimeout(clickedTimer)
+  clickedTimer = window.setTimeout(() => { clickedAct.value = '' }, 800)
+}
+async function copyMsg(m: { content: string }): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(m.content || '')
+    flashAct('copy')
+  } catch { /* clipboard 不可用时静默失败 */ }
+}
+function formatMsgTime(id: string): string {
+  // 从消息 id（如 u-1725100000000）中提取时间戳
+  const ts = parseInt(id.replace(/^[ua]-/, ''), 10)
+  if (isNaN(ts)) return ''
+  const d = new Date(ts)
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
 async function loadByRoute() {
   const id = route.params.id as string | undefined
   if (id) {
@@ -104,19 +126,34 @@ function onKey(e: KeyboardEvent) {
   <div v-else class="chat-page">
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
-        <div v-for="m in chat.messages" :key="m.id" class="msg-row">
-          <MessageBubble
-            v-if="!(chat.streamingHere && m.id === chat.streamingMessageId && (!m.content.trim() || chat.thinking))"
-            :role="m.role"
-            :content="m.content"
-            :citations="m.citations"
-            :active-index="m.activeCitationIndex ?? null"
-            @update:active-index="(n: number) => chat.setActiveCitation(m.id, n <= 0 ? null : n)"
-          />
-          <ThinkingIndicator
-            v-else-if="chat.streamingHere && m.id === chat.streamingMessageId"
-            :show="true"
-          />
+        <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
+          <template v-if="!(chat.streamingHere && m.id === chat.streamingMessageId && (!m.content.trim() || chat.thinking))">
+            <MessageBubble
+              :role="m.role"
+              :content="m.content"
+              :citations="m.citations"
+              :active-index="m.activeCitationIndex ?? null"
+              @update:active-index="(n: number) => chat.setActiveCitation(m.id, n <= 0 ? null : n)"
+            />
+          </template>
+          <template v-else-if="chat.streamingHere && m.id === chat.streamingMessageId">
+            <ThinkingIndicator :show="true" />
+          </template>
+          <div v-if="m.role !== 'system'" class="msg-actions">
+            <span class="msg-time">{{ formatMsgTime(m.id) }}</span>
+            <button class="msg-act" type="button" title="复制" :class="{ clicked: clickedAct === 'copy' }" @click="copyMsg(m)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button v-if="m.role === 'assistant'" class="msg-act" type="button" title="重新生成" :class="{ clicked: clickedAct === 'regen' }" @click="chat.regenerate(); flashAct('regen')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+            <button class="msg-act" type="button" title="删除" :class="{ clicked: clickedAct === 'delete' }" @click="chat.deleteMessage(m.id); flashAct('delete')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+            </button>
+            <button class="msg-act" type="button" title="回退" :class="{ clicked: clickedAct === 'undo' }" @click="chat.undoLast(); flashAct('undo')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
+          </div>
           <CitationPreview
             v-if="m.role === 'assistant' && m.citations && m.citations.length > 0 && m.activeCitationIndex != null && m.activeCitationIndex >= 1 && m.citations[m.activeCitationIndex - 1]"
             class="citations-row"
@@ -222,6 +259,59 @@ function onKey(e: KeyboardEvent) {
 
 /* ====== 消息行（聊天态） ====== */
 .msg-row { margin-bottom: 12px; }
+
+/* 消息操作栏：悬浮消息行时显示，位于气泡下方 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.msg-row:hover .msg-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* 用户消息的操作栏靠右对齐，模型消息靠左 */
+.msg-user .msg-actions { justify-content: flex-end; }
+.msg-assistant .msg-actions { justify-content: flex-start; }
+.msg-time {
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  margin-right: 6px;
+  user-select: none;
+}
+.msg-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.msg-act:hover {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.06));
+  color: var(--text-primary);
+}
+.msg-act.clicked {
+  color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+  animation: msg-act-pop 0.35s ease;
+}
+@keyframes msg-act-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
 .citations-row { margin-top: 6px; }
 .ingest-row { margin-top: 6px; }
 .report-row {
@@ -253,7 +343,7 @@ function onKey(e: KeyboardEvent) {
   padding: 8px 12px;
   background: var(--bg-input-bar);
   border: 1px solid var(--border-input-bar);
-  border-radius: 16px;
+  border-radius: 22px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
@@ -270,12 +360,14 @@ function onKey(e: KeyboardEvent) {
 }
 .chat-input :deep(.n-input) {
   padding: 0 !important;
+  border-radius: 16px !important;
 }
 .chat-input :deep(.n-input__textarea-el) {
   padding: 4px 4px !important;
   margin: 0 !important;
   text-indent: 0 !important;
   resize: none !important;
+  border-radius: 16px !important;
 }
 .chat-input :deep(.n-input__textarea-el::placeholder) {
   text-indent: 0 !important;

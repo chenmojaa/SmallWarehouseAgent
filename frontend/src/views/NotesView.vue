@@ -724,6 +724,13 @@ function openExternal(url?: string | null) {
   padding: 10px 0;
   background: linear-gradient(to bottom, var(--bg-app) 72%, transparent);
 }
+.toolbar :deep(.n-input) {
+  border-radius: 12px;
+}
+.toolbar :deep(.n-input .n-input__border),
+.toolbar :deep(.n-input .n-input__state-border) {
+  border-radius: 12px;
+}
 
 .space-flow {
   display: flex;

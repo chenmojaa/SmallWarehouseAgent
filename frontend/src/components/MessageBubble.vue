@@ -243,7 +243,7 @@ onBeforeUnmount(() => {
       <div v-if="role === 'assistant'" ref="bubbleEl" class="md-body" v-html="renderedHtml"></div>
       <div v-else class="plain-body">{{ bodyNoCite }}</div>
       <div v-if="role === 'assistant' && validSourceTokens.length" class="source-line">
-        <span>\u6765\u6e90\uff1a</span>
+        <span>来源：</span>
         <button
           v-for="n in validSourceTokens"
           :key="n"
