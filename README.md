@@ -1,12 +1,10 @@
+<p align="center"><a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>&nbsp;<a href="README.zh.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red.svg" alt="??"></a></p>
+
 <div align="center">
 
 # HD — Personal Knowledge Base Agent
 
 **A local-first second brain that turns your messy inbox into a searchable knowledge base, with table-aware OCR, multi-agent RAG, and Feishu wiki sync.**
-
-## HD — 个人知识库助手
-
-**本地优先的"第二大脑"，把零散的资料变成可检索的知识库，支持表格感知 OCR、多智能体 RAG 和飞书知识库同步。**
 
 </div>
 
@@ -42,27 +40,6 @@ The differentiators, in one sentence each:
 - **Multi-agent LangGraph** — `router -> (research | ingest | report)` with a `HD_USE_GRAPH=false` legacy switch when things go wrong.
 - **Feishu wiki sync** — ingests wiki docs and bitable records into the same KB; incremental via `obj_edit_time` so changed pages do not re-fetch everything.
 - **Eval-driven** — `scripts/rag_eval/` ships a golden set and a runner that emits Recall@K, MRR, and a smalltalk false-citation rate. Tune weights, rerun, decide.
-
-## 这是什么？
-
-HD 是一个**跑在你本机上的个人知识库**，配套一个聊天界面——能拿你自己的文档回答问题，每条结论都带 [1] [2] 引用，点回去就能看到原文片段。
-
-一开始只是个 RAG 演示，后来演化成多智能体系统：
-
-- **路由器**先搞清楚你的需求是聊天、多轮研究、入库还是周报
-- 四个**子智能体**分别干活
-- 最后由 LLM 综合答案，带可点击的引用回到原始切片
-
-它和别的 RAG 不一样的几个点（一句话版）：
-
-- **表格感知解析**——Excel / Word / PPT 的合并单元格完整保留，扫描 PDF 走 OCR + 列聚类还原表格；出来的全是 LLM 能直接读的 Markdown 表格。
-- **混合检索**——Chroma 向量 + SQLite FTS5 BM25（按 `0.7 / 0.3` 加权），中文友好，首请求不会因为 `embo-01` 的怪脾气炸掉。
-- **多智能体 LangGraph**——路由器 -> (研究 | 入库 | 周报)，配 `HD_USE_GRAPH=false` 兜底直调链路。
-- **飞书知识库同步**——文档 + 多维表格拉进同一个 KB，按 `obj_edit_time` 增量更新，没改的页面不重拉。
-- **评测驱动**——`scripts/rag_eval/` 内置金标准集和跑分脚本，出 Recall@K / MRR / 闲聊误引率。调权重、重跑、拍板。
-
-
----
 
 ## Features
 
