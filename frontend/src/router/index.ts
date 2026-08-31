@@ -31,4 +31,17 @@ router.beforeEach((to) => {
   return true
 })
 
+// 路由守卫：未登录一律跳转登录页
+router.beforeEach((to) => {
+  if (to.meta.public) {
+    // 已登录访问登录页时直接进入应用
+    if (to.name === login && hasToken()) return { path: /chat }
+    return true
+  }
+  if (!hasToken()) {
+    return { name: login, query: to.fullPath !== / ? { redirect: to.fullPath } : {} }
+  }
+  return true
+})
+
 export default router
