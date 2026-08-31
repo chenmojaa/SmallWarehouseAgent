@@ -247,6 +247,7 @@ def _extract_tar(data: bytes, destination: Path) -> None:
 
 
 def _find_skill_roots(base: Path) -> list[Path]:
+    base_resolved = base.resolve()
     matches = sorted(
         base.rglob("SKILL.md"),
         key=lambda path: (len(path.parts), str(path).lower()),
@@ -255,7 +256,7 @@ def _find_skill_roots(base: Path) -> list[Path]:
     seen: set[Path] = set()
     for manifest in matches:
         root = manifest.parent.resolve()
-        if root not in seen and base.resolve() in root.parents:
+        if root not in seen and (root == base_resolved or base_resolved in root.parents):
             roots.append(root)
             seen.add(root)
     return roots

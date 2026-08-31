@@ -32,6 +32,10 @@ function gotoNotes() {
   router.push({ name: 'notes' })
 }
 
+function gotoMcp() {
+  router.push({ name: 'mcp' })
+}
+
 async function openSession(id: string) {
   if (id === activeId.value) {
     // Same session re-clicked: force a reload so the UI always reflects latest server state.
@@ -217,6 +221,7 @@ function sourceLabel(skill: InstalledSkill) {
       <n-button block quaternary @click="gotoNotes" class="action-btn">知识库</n-button>
       <n-button block quaternary @click="openSearch" class="action-btn">搜索对话</n-button>
       <n-button block quaternary @click="openSkill" class="action-btn">技能</n-button>
+      <n-button block quaternary @click='gotoMcp' class='action-btn'>MCP</n-button>
     </div>
     <div class="chat-history-header">
       <span class="title">历史记录</span>
