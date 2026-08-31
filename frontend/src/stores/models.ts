@@ -123,7 +123,7 @@ export const useModelsStore = defineStore('models', {
 
         this.loaded = true
       } catch (e) {
-        this.lastError = (e as Error).message || String(e)
+        this.lastError = ((e && (e as Error).message) || String(e) || 'unknown error')
         console.error('[models] loadFromBackend failed:', this.lastError)
         const cached = readModelsCache()
         if (cached.items.length > 0) {
@@ -162,7 +162,7 @@ export const useModelsStore = defineStore('models', {
         if (this.selectedId === placeholder.id) {
           this.selectedId = this.list[0]?.id ?? null
         }
-        this.lastError = (e as Error).message || String(e)
+        this.lastError = ((e && (e as Error).message) || String(e) || 'unknown error')
         return false
       }
     },
@@ -180,7 +180,7 @@ export const useModelsStore = defineStore('models', {
         return true
       } catch (e) {
         if (i >= 0 && original) this.list[i] = original
-        this.lastError = (e as Error).message || String(e)
+        this.lastError = ((e && (e as Error).message) || String(e) || 'unknown error')
         return false
       }
     },
@@ -202,7 +202,7 @@ export const useModelsStore = defineStore('models', {
       } catch (e) {
         this.list = originalList
         if (wasSelected) this.selectedId = id
-        this.lastError = (e as Error).message || String(e)
+        this.lastError = ((e && (e as Error).message) || String(e) || 'unknown error')
         return false
       }
     },
@@ -217,7 +217,7 @@ export const useModelsStore = defineStore('models', {
         return true
       } catch (e) {
         this.selectedId = original
-        this.lastError = (e as Error).message || String(e)
+        this.lastError = ((e && (e as Error).message) || String(e) || 'unknown error')
         return false
       }
     },
