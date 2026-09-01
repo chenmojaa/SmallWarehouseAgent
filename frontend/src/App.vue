@@ -117,7 +117,7 @@ const settingsOpen = ref(false)
                 <line x1="3" y1="18" x2="21" y2="18"/>
               </svg>
             </button>
-            <n-text strong style="font-size: 16px">smallhouse</n-text>
+            <img src="/logo.png" alt="Small Warehouse Agent" class="brand-logo" />
             <n-text depth="3" style="font-size: 11px">v0.6</n-text>
           </n-space>
           <n-space align="center" :wrap="false">
@@ -190,5 +190,12 @@ const settingsOpen = ref(false)
 .theme-icon {
   font-size: 16px;
   line-height: 1;
+}
+.brand-logo {
+  height: 28px;
+  width: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 </style>
