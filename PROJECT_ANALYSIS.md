@@ -120,13 +120,16 @@ SSE 流式返回（stage 进度 / think 思考过程 / delta 正文 / citations 
   - 注册写入 `installed.json`，支持查看技能文件结构、打包下载 zip。
 - 技能中心分「推荐首页」与「我的技能」两个视图，支持搜索、介绍展开/收起。
 
-### 2.10 MCP 服务管理
+### 2.10 MCP 服务管理与工具调用
 
-**文件**：`backend/app/api/mcp.py`
+**文件**：`backend/app/api/mcp.py`、`backend/app/agent/tools/mcp_client.py`、`mcp_tools.py`
 
-- MCP（Model Context Protocol）服务配置的完整 CRUD，支持两种传输方式：**stdio**（命令行启动）与 **http**（SSE / Streamable HTTP）。
-- 启动参数（JSON 数组）与环境变量（JSON 对象）配置 + 连接测试（test）。
-- 内置预设（presets）可一键导入。
+- **配置管理**：MCP 服务 CRUD，支持 stdio / http（SSE / Streamable HTTP）两种传输方式，启动参数与环境变量 JSON 配置，连接测试，内置预设一键导入。
+- **Agent 真实调用 MCP（全链路已打通）**：
+  - **自研轻量 MCP 客户端**（不依赖 `mcp`/`langchain-mcp-adapters`）：子进程拉起 stdio server → JSON-RPC 2.0 握手（initialize）→ `tools/list` 工具发现 → `tools/call` 工具执行；
+  - **协议细节**：MCP stdio 传输为**换行分隔 JSON**（非 LSP Content-Length 帧）；Windows 下用**每进程单例读线程 + queue** 读取（`select()` 不支持 Windows 管道，且多读线程会互抢响应行）；`npx` 需解析为 `npx.CMD`；进程清理用 `taskkill /T` 杀整棵进程树（terminate 只杀 cmd 壳会留下 node 僵尸）；
+  - **工具抽象**：暴露 `mcp_list_servers` / `mcp_discover_tools` / `mcp_invoke` 三个聚合工具（而非每工具一个），模型先发现再调用；能力清单注入 system prompt；
+  - **tool-call 循环**：answer 节点 `bind_tools` 后最多 4 步循环（可配），每次调用的发起/结果通过 SSE `tool` 事件推给前端，渲染为 running→ok/failed 状态 chips。
 
 ### 2.11 周报代理（Report）
 

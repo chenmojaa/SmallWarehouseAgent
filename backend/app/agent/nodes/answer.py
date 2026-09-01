@@ -151,6 +151,14 @@ async def answer_node_stream(state: AgentState):
   chat, msgs, chunks, tools, _inventory = _build_messages(state)
   full_text = ""
 
+  # 权限模式：default=本地能力调用需用户逐次批准；full=不询问。
+  # 同时把模式同步给 mcp_tools（限定 filesystem server 的授权目录）。
+  from app.agent.tools import mcp_tools as _mcp_tools
+  from app.agent.tools import permissions as _perm
+  perm_mode = (state.get("agent_permission") or "default").lower()
+  _mcp_tools.set_permission_mode(perm_mode)
+  turn_approved = False  # 一轮内批准过一次后续不再重复询问
+
   if tools and settings.tools_enabled:
     from langchain_core.messages import ToolMessage
     bound = chat.bind_tools(tools)
@@ -175,13 +183,44 @@ async def answer_node_stream(state: AgentState):
         "names": [tc.get("name") for tc in tcs],
       })
       msgs = msgs + [resp]
+      executed_any = False
       for tc in tcs:
         name = tc.get("name") or "unknown_tool"
         args = tc.get("args") or {}
         tc_id = tc.get("id") or ""
         yield ("tool_call", {"name": name, "args": args})
         tool = _tool_by_name(tools, name)
-        if tool is None:
+
+        # ---- 权限门控（默认模式）----
+        # mcp_invoke 意味着访问本地能力（文件/命令/网络），默认模式下
+        # 先经用户批准：yield permission_request -> 前端弹窗 -> POST 决定。
+        denied_by_permission = False
+        if (perm_mode != "full" and name == "mcp_invoke" and tool is not None
+                and not turn_approved):
+          req_id, _fut = _perm.create_request()
+          yield ("permission_request", {
+            "request_id": req_id,
+            "tool": name,
+            "args": args,
+          })
+          approved = await _perm.wait_decision(req_id)
+          yield ("permission_result", {"request_id": req_id, "approved": approved})
+          if approved:
+            turn_approved = True
+            # 把本次请求涉及的盘符根加入授权范围（后续同轮调用不再被
+            # filesystem server 的 allowed-dirs 拦截）
+            args = args if isinstance(args, dict) else {}
+            _mcp_tools.add_approved_dirs_from(args)
+          else:
+            denied_by_permission = True
+
+        if denied_by_permission:
+          observation = (
+            "[权限拒绝] 用户未授权本次本地访问。请直接告诉用户：如需让助手"
+            "访问本地文件，可以在聊天输入框下方开启「完全访问」权限后重试。"
+          )
+          ok = False
+        elif tool is None:
           observation = "[tool error] unknown tool %r" % name
           ok = False
         else:
@@ -189,12 +228,24 @@ async def answer_node_stream(state: AgentState):
             out = await tool.ainvoke(args)
             observation = out if isinstance(out, str) else str(out)
             ok = True
+            executed_any = True
           except Exception as e:
             observation = "[tool error] %s: %s" % (type(e).__name__, e)
             ok = False
         snippet = observation[:300] if isinstance(observation, str) else str(observation)[:300]
         yield ("tool_result", {"name": name, "ok": ok, "snippet": snippet})
         msgs = msgs + [ToolMessage(content=observation, tool_call_id=tc_id)]
+      # Nudge the model to keep going: without this, models tend to reply with
+      # "here are the steps I would take" instead of actually calling the next
+      # tool (observed with MiniMax-Text-01).
+      from langchain_core.messages import SystemMessage as _SM
+      msgs = msgs + [_SM(content=(
+        "Tool call(s) executed — the results are in the tool messages above. "
+        "If the user's task is NOT yet fully answered with real data, "
+        "immediately call the next tool (e.g. mcp_discover_tools or "
+        "mcp_invoke); do NOT describe what you would do. Only give the final "
+        "answer once you have the actual results."
+      ))] if executed_any else msgs
     else:
       # ran out of steps without a text answer; force one last pass
       try:

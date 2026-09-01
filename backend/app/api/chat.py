@@ -44,6 +44,12 @@ class ChatRequest(BaseModel):
   reasoning_level: str | None = None
   embedding_model: str | None = None
   embedding_base_url: str | None = None
+  agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
+
+
+class PermissionDecision(BaseModel):
+  request_id: str
+  approve: bool
 
 
 def _extract_query(messages):
@@ -114,7 +120,16 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "report_result": {},
     "answer": None,
     "citations": [],
+    "agent_permission": (body.agent_permission or "default").lower(),
   }
+
+
+@router.post("/chat/permission")
+async def resolve_permission(body: PermissionDecision):
+  """Frontend answers a pending agent permission request (allow/deny)."""
+  from app.agent.tools import permissions as _perm
+  ok = _perm.resolve(body.request_id, body.approve)
+  return {"ok": ok}
 
 
 @router.post("/chat")
@@ -229,6 +244,19 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
             for line in payload.split(chr(10)):
               yield "data: " + line + chr(10)
             yield chr(10)
+          elif kind == "tool_calls_batch":
+            yield _sse("tool", {"phase": "start", "calls": payload.get("names") or []})
+          elif kind == "tool_call":
+            yield _sse("tool", {"phase": "call", "name": payload.get("name"),
+                                "args": payload.get("args")})
+          elif kind == "tool_result":
+            yield _sse("tool", {"phase": "result", "name": payload.get("name"),
+                                "ok": payload.get("ok"),
+                                "snippet": payload.get("snippet")})
+          elif kind == "permission_request":
+            yield _sse("permission", {"phase": "request", **payload})
+          elif kind == "permission_result":
+            yield _sse("permission", {"phase": "result", **payload})
           elif kind == "done":
             citations = payload.get("citations") or []
           elif kind == "error":
@@ -283,6 +311,19 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
           for line in payload.split(chr(10)):
             yield "data: " + line + chr(10)
           yield chr(10)
+        elif kind == "tool_calls_batch":
+          yield _sse("tool", {"phase": "start", "calls": payload.get("names") or []})
+        elif kind == "tool_call":
+          yield _sse("tool", {"phase": "call", "name": payload.get("name"),
+                              "args": payload.get("args")})
+        elif kind == "tool_result":
+          yield _sse("tool", {"phase": "result", "name": payload.get("name"),
+                              "ok": payload.get("ok"),
+                              "snippet": payload.get("snippet")})
+        elif kind == "permission_request":
+          yield _sse("permission", {"phase": "request", **payload})
+        elif kind == "permission_result":
+          yield _sse("permission", {"phase": "result", **payload})
         elif kind == "done":
           citations = payload.get("citations") or []
         elif kind == "error":

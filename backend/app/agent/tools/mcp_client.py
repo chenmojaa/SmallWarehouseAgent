@@ -1,4 +1,4 @@
-﻿"""Minimal stdio JSON-RPC 2.0 client for MCP servers.
+"""Minimal stdio JSON-RPC 2.0 client for MCP servers.
 
 We deliberately avoid pulling in `mcp` / `langchain-mcp-adapters`; the protocol
 surface we need is tiny and predictable:
@@ -7,8 +7,12 @@ surface we need is tiny and predictable:
   - tools/list
   - tools/call
 
+MCP stdio transport frames each JSON-RPC message as ONE line (newline
+delimited) - NOT LSP-style Content-Length framing. Reading uses a daemon
+thread + queue because ``select()`` does not work on Windows pipes.
+
 Each call spawns the server fresh, performs the handshake, executes exactly one
-`tools/call`, then closes the process. Stdio MCP servers are idle between calls
+request, then closes the process. Stdio MCP servers are idle between calls
 so the overhead is acceptable; for hot paths callers should cache the process.
 
 Failure modes: any non-zero return code, timeout, or unexpected JSON is
@@ -20,6 +24,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -51,56 +57,80 @@ class MCPServerSpec:
     )
 
 
-def _read_message(stream, timeout: float) -> dict | None:
-  """Read one Content-Length framed JSON-RPC message from `stream`."""
-  import select
+def _reader_queue(proc: subprocess.Popen) -> "queue.Queue":
+  """Return the process-wide reader queue (single daemon thread per process).
+
+  One reader thread per process is REQUIRED: if every _read_message call
+  spawned its own thread, the abandoned threads from earlier calls would
+  keep consuming later responses from the same stream.
+  """
+  q = getattr(proc, "_mcp_reader_q", None)
+  if q is None:
+    q = queue.Queue()
+
+    def _reader():
+      try:
+        for raw in proc.stdout:
+          line = raw.decode("utf-8", errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
+          if not line:
+            continue
+          try:
+            msg = json.loads(line)
+          except ValueError:
+            continue
+          if isinstance(msg, dict):
+            q.put(msg)
+      except Exception:
+        pass
+      q.put(None)  # EOF / reader died
+
+    threading.Thread(target=_reader, daemon=True).start()
+    proc._mcp_reader_q = q  # type: ignore[attr-defined]
+  return q
+
+
+def _read_message(proc: subprocess.Popen, timeout: float) -> dict | None:
+  """Read one JSON-RPC *response* (message with an ``id``) from the process.
+
+  MCP stdio frames messages as newline-delimited JSON. Server notifications
+  (no ``id``) and non-JSON stdout noise (npm banners etc.) are skipped.
+  A daemon reader thread is used because ``select()`` cannot wait on
+  Windows pipes.
+  """
+  q = _reader_queue(proc)
   deadline = time.time() + timeout
-  headers: dict[str, str] = {}
-  # Read headers.
   while True:
     remaining = deadline - time.time()
     if remaining <= 0:
       return None
-    ready, _, _ = select.select([stream], [], [], min(remaining, 5.0))
-    if not ready:
+    try:
+      msg = q.get(timeout=remaining)
+    except queue.Empty:
       return None
-    line = stream.readline()
-    if not line:
+    if msg is None:
       return None
-    line = line.decode("utf-8", errors="replace").rstrip("\r\n")
-    if line == "":
-      break  # headers complete
-    if ":" in line:
-      k, v = line.split(":", 1)
-      headers[k.strip().lower()] = v.strip()
-  length = int(headers.get("content-length") or 0)
-  if length <= 0:
-    return None
-    # body
-    buf = b""
-    while len(buf) < length:
-      remaining = deadline - time.time()
-      if remaining <= 0:
-        return None
-      ready, _, _ = select.select([stream], [], [], min(remaining, 5.0))
-      if not ready:
-        return None
-      chunk = stream.read(length - len(buf))
-      if not chunk:
-        return None
-      buf += chunk
+    if "id" in msg:  # response to our request; skip notifications
+      return msg
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+  """Terminate the server AND its children (npx.cmd -> node)."""
   try:
-    return json.loads(buf.decode("utf-8", errors="replace"))
-  except json.JSONDecodeError:
-    return None
+    if os.name == "nt":
+      subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                     capture_output=True,
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    else:
+      proc.terminate()
+  except Exception:
+    pass
 
 
 def _write_message(proc: subprocess.Popen, msg: dict) -> None:
   payload = json.dumps(msg, ensure_ascii=False).encode("utf-8")
-  header = ("Content-Length: %d\r\n\r\n" % len(payload)).encode("ascii")
   if proc.stdin is None:
     raise RuntimeError("subprocess stdin unavailable")
-  proc.stdin.write(header + payload)
+  proc.stdin.write(payload + b"\n")
   proc.stdin.flush()
 
 
@@ -108,17 +138,28 @@ def _spawn(spec: MCPServerSpec, cwd: str | None) -> subprocess.Popen:
   full_env = dict(os.environ)
   full_env.update(spec.env)
   creationflags = 0
+  argv = [spec.command, *spec.args]
   if os.name == "nt":
     # Avoid showing console flashes for stdio MCP servers (npx, uvx, etc.).
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    # On Windows `npx` / `uvx` are .cmd shims; Popen(shell=False) cannot find
+    # them by bare name, so resolve via PATH (PATHEXT-aware) first.
+    cmd0 = argv[0]
+    if os.path.sep not in cmd0 and not os.path.isfile(cmd0):
+      resolved = shutil.which(cmd0)
+      if resolved:
+        argv[0] = resolved
+      else:
+        # Last resort: run through cmd /c so .cmd shims on PATH still work.
+        argv = ["cmd", "/c", *argv]
   return subprocess.Popen(
-    [spec.command, *spec.args],
+    argv,
     cwd=cwd,
     env=full_env,
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
-    bufsize=0,
+    bufsize=-1,
     creationflags=creationflags,
   )
 
@@ -134,7 +175,7 @@ def _handshake(proc: subprocess.Popen, init_timeout: float) -> bool:
       "clientInfo": {"name": "small-warehouse-agent", "version": _CLIENT_VERSION},
     },
   })
-  resp = _read_message(proc.stdout, init_timeout)
+  resp = _read_message(proc, init_timeout)
   if not resp or "result" not in resp:
     return False
   # notifications/initialized (no response expected).
@@ -164,16 +205,13 @@ def list_tools(spec: MCPServerSpec, init_timeout: float, call_timeout: float,
       "method": "tools/list",
       "params": {},
     })
-    resp = _read_message(proc.stdout, call_timeout)
+    resp = _read_message(proc, call_timeout)
     if not resp:
       return []
     tools = ((resp.get("result") or {}).get("tools") or [])
     return [t for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
   finally:
-    try:
-      proc.terminate()
-    except Exception:
-      pass
+    _kill_tree(proc)
 
 
 def call_tool(spec: MCPServerSpec, tool_name: str, arguments: dict,
@@ -193,7 +231,7 @@ def call_tool(spec: MCPServerSpec, tool_name: str, arguments: dict,
       "method": "tools/call",
       "params": {"name": tool_name, "arguments": arguments or {}},
     })
-    resp = _read_message(proc.stdout, call_timeout)
+    resp = _read_message(proc, call_timeout)
     if not resp:
       return "[mcp error] no response from %s within %.1fs" % (spec.server_id, call_timeout)
     if "error" in resp:
@@ -216,7 +254,105 @@ def call_tool(spec: MCPServerSpec, tool_name: str, arguments: dict,
       return content
     return json.dumps(result, ensure_ascii=False)
   finally:
+    _kill_tree(proc)
+
+
+class MCPSession:
+  """Long-lived stdio MCP session: spawn + handshake ONCE, reuse for many calls.
+
+  Rationale: spawning npx costs 2-3s per call (npx resolution + node boot +
+  JSON-RPC handshake). A multi-step agent turn can invoke the same server
+  5+ times, so keeping the process alive for the whole turn saves ~10s.
+
+  Robustness: ``alive`` is checked before each call; a dead/EOF'd process is
+  transparently respawned and the handshake redone, so callers never see the
+  difference. ``close()`` kills the whole process tree (npx.cmd -> node).
+  """
+
+  def __init__(self, spec: MCPServerSpec, cwd: str | None = None,
+               init_timeout: float = 10.0, call_timeout: float = 30.0):
+    self.spec = spec
+    self.cwd = cwd
+    self.init_timeout = init_timeout
+    self.call_timeout = call_timeout
+    self._proc: subprocess.Popen | None = None
+    self._next_id = 1  # 0 is reserved by JSON-RPC for request ids we skip
+    self._calls = 0
+
+  # ---- lifecycle ----
+  @property
+  def alive(self) -> bool:
+    return self._proc is not None and self._proc.poll() is None
+
+  def _ensure_started(self) -> bool:
+    if self.alive:
+      return True
     try:
-      proc.terminate()
-    except Exception:
-      pass
+      self._proc = _spawn(self.spec, self.cwd)
+    except (OSError, ValueError) as e:
+      _log.warning("mcp %s: spawn failed: %s", self.spec.server_id, e)
+      return False
+    if not _handshake(self._proc, self.init_timeout):
+      _log.warning("mcp %s: handshake failed", self.spec.server_id)
+      self.close()
+      return False
+    self._next_id = 10  # handshake used id 1
+    return True
+
+  def close(self) -> None:
+    if self._proc is not None:
+      _kill_tree(self._proc)
+      self._proc = None
+
+  # ---- protocol ----
+  def _request(self, method: str, params: dict) -> dict | None:
+    if not self._ensure_started():
+      return None
+    self._next_id += 1
+    _write_message(self._proc, {
+      "jsonrpc": "2.0",
+      "id": self._next_id,
+      "method": method,
+      "params": params,
+    })
+    return _read_message(self._proc, self.call_timeout)
+
+  def list_tools(self) -> list[dict]:
+    resp = self._request("tools/list", {})
+    if not resp:
+      return []
+    tools = ((resp.get("result") or {}).get("tools") or [])
+    return [t for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)]
+
+  def call(self, tool_name: str, arguments: dict) -> str:
+    resp = self._request("tools/call", {"name": tool_name, "arguments": arguments or {}})
+    self._calls += 1
+    if resp is None:
+      # Process likely died mid-turn; one transparent retry with fresh spawn.
+      self.close()
+      resp = self._request("tools/call", {"name": tool_name, "arguments": arguments or {}})
+    if resp is None:
+      return "[mcp error] no response from %s within %.1fs" % (self.spec.server_id, self.call_timeout)
+    if "error" in resp:
+      err = resp["error"]
+      return "[mcp error] %s: %s" % (err.get("code"), err.get("message") or err)
+    result = resp.get("result") or {}
+    content = result.get("content")
+    if isinstance(content, list):
+      parts: list[str] = []
+      for item in content:
+        if isinstance(item, dict):
+          if item.get("type") == "text" and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+          else:
+            parts.append(json.dumps(item, ensure_ascii=False))
+        elif isinstance(item, str):
+          parts.append(item)
+      return "\n".join(parts) or json.dumps(result, ensure_ascii=False)
+    if isinstance(content, str):
+      return content
+    return json.dumps(result, ensure_ascii=False)
+
+  @property
+  def calls(self) -> int:
+    return self._calls

@@ -1,8 +1,20 @@
 import { defineStore } from 'pinia'
-import { chatStream, stripThink, type ChatMessage, type Citation, type IngestResult, type ReportResult } from '@/api/chat'
+import { chatStream, respondPermission, stripThink, type ChatMessage, type Citation, type IngestResult, type ReportResult, type ToolEvent, type PermissionEvent } from '@/api/chat'
 import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
+
+export interface ToolCallItem {
+  name: string
+  status: 'running' | 'ok' | 'failed'
+  snippet?: string
+}
+
+export interface PendingPermission {
+  requestId: string
+  tool: string
+  args: unknown
+}
 
 interface Msg extends ChatMessage {
   id: string
@@ -10,6 +22,7 @@ interface Msg extends ChatMessage {
   activeCitationIndex?: number | null
   ingest?: IngestResult
   report?: ReportResult
+  toolCalls?: ToolCallItem[]
 }
 export interface PipelineStage {
   stage: "router" | "rag_search" | "llm_stream" | "agent"
@@ -42,6 +55,10 @@ interface State {
   // user gets a hint that the model is reasoning (not stalling) before the
   // first body token arrives.
   thinking: boolean
+  // Agent 本地访问权限：default=每次访问前询问；full=完全访问不询问
+  agentPermission: 'default' | 'full'
+  // 当前待用户批准的权限请求（弹窗数据）
+  pendingPermission: PendingPermission | null
 }
 
 export const useChatStore = defineStore("chat", {
@@ -58,12 +75,30 @@ export const useChatStore = defineStore("chat", {
     stage: null,
     streamingSnapshot: null,
     thinking: false,
+    agentPermission: ((): 'default' | 'full' => {
+      try { return localStorage.getItem('agent-permission') === 'full' ? 'full' : 'default' } catch { return 'default' }
+    })(),
+    pendingPermission: null,
   }),
   getters: {
     streamingHere: (s): boolean => s.isStreaming && s.streamingSessionId !== null && s.streamingSessionId === s.sessionId,
   },
   actions: {
     toggleRag() { this.useRag = !this.useRag },
+    setAgentPermission(mode: 'default' | 'full') {
+      this.agentPermission = mode
+      try {
+        if (mode === 'full') localStorage.setItem('agent-permission', 'full')
+        else localStorage.removeItem('agent-permission')
+      } catch {}
+    },
+    // 用户在弹窗中回复权限请求
+    async resolvePermission(approve: boolean) {
+      const p = this.pendingPermission
+      if (!p) return
+      this.pendingPermission = null
+      try { await respondPermission(p.requestId, approve) } catch {}
+    },
     async send(text: string) {
       if (!text.trim()) return
       if (this.isStreaming) return
@@ -156,6 +191,7 @@ export const useChatStore = defineStore("chat", {
           reasoning_level: reasoning ?? null,
           embedding_model: embeddingModel ?? null,
           embedding_base_url: baseUrl ?? null,
+          agent_permission: this.agentPermission,
         }, this.abortCtl?.signal)
         for await (const ev of stream) {
           if (ev.type === 'session' && ev.session_id) {
@@ -167,6 +203,35 @@ export const useChatStore = defineStore("chat", {
             flushBubble()
           } else if (ev.type === 'stage' && ev.data && typeof ev.data === 'object') {
             this.stage = { ...(ev.data as PipelineStage), at: Date.now() }
+          } else if (ev.type === 'tool' && ev.data && typeof ev.data === 'object') {
+            // 工具调用进度：running -> ok/failed，最终渲染为消息上方的工具条
+            const t = ev.data as ToolEvent
+            if (!asstMsg.toolCalls) asstMsg.toolCalls = []
+            if (t.phase === 'call' && t.name) {
+              asstMsg.toolCalls.push({ name: t.name, status: 'running' })
+            } else if (t.phase === 'result' && t.name) {
+              const pending = [...asstMsg.toolCalls].reverse().find(x => x.name === t.name && x.status === 'running')
+              if (pending) {
+                pending.status = t.ok ? 'ok' : 'failed'
+                pending.snippet = t.snippet
+              } else {
+                asstMsg.toolCalls.push({ name: t.name, status: t.ok ? 'ok' : 'failed', snippet: t.snippet })
+              }
+            }
+            const idx = this.messages.findIndex(m => m.id === asstMsg.id)
+            if (idx >= 0) this.messages[idx] = { ...asstMsg }
+          } else if (ev.type === 'permission' && ev.data && typeof ev.data === 'object') {
+            // 权限请求（默认模式）：弹窗让用户批准/拒绝本地访问
+            const p = ev.data as PermissionEvent
+            if (p.phase === 'request') {
+              this.pendingPermission = {
+                requestId: p.request_id,
+                tool: p.tool || 'mcp_invoke',
+                args: p.args,
+              }
+            } else if (p.phase === 'result') {
+              this.pendingPermission = null
+            }
           } else if (ev.type === 'citations' && Array.isArray(ev.data)) {
             asstMsg.citations = ev.data as Citation[]
             const idx = this.messages.findIndex(m => m.id === asstMsg.id)
@@ -210,6 +275,7 @@ export const useChatStore = defineStore("chat", {
         this.stage = null
         this.thinking = false
         this.streamingSnapshot = null
+        this.pendingPermission = null
       }
     },
     async loadFromSession(sessionId: string) {

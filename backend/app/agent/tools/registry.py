@@ -1,4 +1,4 @@
-﻿"""Aggregate agent tools + build the short "available capabilities" inventory.
+"""Aggregate agent tools + build the short "available capabilities" inventory.
 
 Two artefacts:
 
@@ -60,5 +60,11 @@ def inventory_text() -> str:
   if not blocks:
     return ""
   return ("\n\nYou have the following external capabilities available via tool calls. "
-          "Use them when they would clearly help, without forcing every turn:\n\n" +
+          "Use them when they would clearly help, without forcing every turn.\n"
+          "IMPORTANT: when the user's request needs these capabilities (reading/writing local "
+          "files, fetching a URL, querying a database...), you MUST actually call the tools "
+          "to complete the task and answer with the real results. NEVER reply with only a "
+          "description of the steps the user or you *could* take. A typical flow is: "
+          "mcp_list_servers -> mcp_discover_tools -> mcp_invoke (possibly multiple times) -> "
+          "then summarize the actual results for the user.\n\n" +
           "\n\n".join(blocks))

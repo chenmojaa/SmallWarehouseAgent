@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 import { useModelsStore } from '@/stores/models'
-import { NSpace, NInput, NButton, NText, NSwitch } from 'naive-ui'
+import { NSpace, NInput, NButton, NText, NSwitch, NModal, NSelect } from 'naive-ui'
 import MessageBubble from '@/components/MessageBubble.vue'
 import ThinkingIndicator from '@/components/ThinkingIndicator.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
@@ -19,6 +19,26 @@ const route = useRoute()
 
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
+
+// Agent 本地访问权限模式下拉选项：完全访问为红色警示
+const permissionOptions = computed(() => [
+  { label: '默认权限', value: 'default' },
+  { label: '完全访问', value: 'full', class: 'perm-option-danger' },
+])
+
+// 选择完全访问时先弹窗确认
+const confirmFullOpen = ref(false)
+function onPermissionChange(v: string) {
+  if (v === 'full') {
+    confirmFullOpen.value = true   // 先弹确认框，确认后再真正切换
+    return
+  }
+  chat.setAgentPermission('default')
+}
+function confirmFullAccess() {
+  chat.setAgentPermission('full')
+  confirmFullOpen.value = false
+}
 
 // === 消息操作 ===
 const clickedAct = ref('')
@@ -55,7 +75,17 @@ async function loadByRoute() {
 
 onMounted(() => {
   sessions.load()
-  loadByRoute()
+  loadByRoute().then(() => {
+    // MCP 页面「发起试试」：跳转过来后自动发送暂存的问题
+    const q = sessionStorage.getItem('mcp-quick-prompt')
+    if (q) {
+      sessionStorage.removeItem('mcp-quick-prompt')
+      if (!chat.streamingHere) chat.send(q).then(() => {
+        nextTick(() => { if (scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight })
+        sessions.load()
+      })
+    }
+  })
 })
 watch(() => route.params.id, loadByRoute)
 
@@ -103,6 +133,17 @@ function onKey(e: KeyboardEvent) {
             <span class="rag-label">知识库</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
           </div>
+          <div class="rag-group perm-group" :title="chat.agentPermission === 'full' ? '完全访问：Agent 可直接访问本机磁盘，不再询问' : '默认权限：Agent 访问本地文件前会先询问你'">
+            <n-select
+              :value="chat.agentPermission ?? 'default'"
+              :options="permissionOptions"
+              size="tiny"
+              class="perm-select"
+              :class="{ 'perm-full': chat.agentPermission === 'full' }"
+              placeholder="默认权限"
+              @update:value="onPermissionChange"
+            />
+          </div>
           <div style="flex: 1; min-width: 0"></div>
           <ModelSelector />
           <n-button class="send-btn" type="primary" :disabled="chat.streamingHere" @click="send" circle>
@@ -127,6 +168,19 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
+          <!-- 工具调用进度条：MCP / 技能工具的 running -> ok/failed 状态 -->
+          <div v-if="m.role === 'assistant' && m.toolCalls && m.toolCalls.length" class="tool-strip">
+            <span
+              v-for="(t, i) in m.toolCalls" :key="i"
+              class="tool-chip" :class="t.status"
+              :title="t.snippet"
+            >
+              <span v-if="t.status === 'running'" class="tool-spin">◌</span>
+              <span v-else-if="t.status === 'ok'" class="tool-ok">✓</span>
+              <span v-else class="tool-fail">✕</span>
+              {{ t.name }}
+            </span>
+          </div>
           <!-- Render the bubble as soon as ANY content exists (including a
                partial <think> block) so the collapsible thinking section is
                visible and live-updating during the whole stream. The
@@ -193,6 +247,17 @@ function onKey(e: KeyboardEvent) {
             <span class="rag-label">知识库</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
           </div>
+          <div class="rag-group perm-group" :title="chat.agentPermission === 'full' ? '完全访问：Agent 可直接访问本机磁盘，不再询问' : '默认权限：Agent 访问本地文件前会先询问你'">
+            <n-select
+              :value="chat.agentPermission ?? 'default'"
+              :options="permissionOptions"
+              size="tiny"
+              class="perm-select"
+              :class="{ 'perm-full': chat.agentPermission === 'full' }"
+              placeholder="默认权限"
+              @update:value="onPermissionChange"
+            />
+          </div>
           <div style="flex: 1; min-width: 0"></div>
           <ModelSelector />
           <n-button class="send-btn" type="primary" :disabled="chat.streamingHere" @click="send" circle>
@@ -207,6 +272,36 @@ function onKey(e: KeyboardEvent) {
       </div>
     </div>
   </div>
+
+  <!-- 权限审批弹窗：默认权限模式下 Agent 请求访问本地文件时弹出 -->
+  <n-modal :show="!!chat.pendingPermission" @update:show="(v: boolean) => { if (!v) chat.resolvePermission(false) }" :mask-closable="false">
+    <div v-if="chat.pendingPermission" class="perm-dialog">
+      <div class="perm-dialog-icon">🔐</div>
+      <h3 class="perm-dialog-title">助手请求访问本地资源</h3>
+      <p class="perm-dialog-desc">助手正在「默认权限」模式下运行，执行以下操作前需要你的确认：</p>
+      <div class="perm-dialog-detail">
+        <div class="perm-row"><span class="perm-k">工具</span><code>{{ chat.pendingPermission.tool }}</code></div>
+        <div class="perm-row"><span class="perm-k">参数</span><code class="perm-args">{{ JSON.stringify(chat.pendingPermission.args, null, 2) }}</code></div>
+      </div>
+      <div class="perm-dialog-actions">
+        <n-button @click="chat.resolvePermission(false)">拒绝</n-button>
+        <n-button type="primary" @click="chat.resolvePermission(true)">允许本次访问</n-button>
+      </div>
+      <p class="perm-dialog-hint">如不想每次确认，可在输入框下方开启「完全访问」权限</p>
+    </div>
+  </n-modal>
+
+  <!-- 开启完全访问的二次确认弹窗 -->
+  <n-modal :show="confirmFullOpen" @update:show="(v: boolean) => { if (!v) confirmFullOpen = false }" :mask-closable="false">
+    <div class="perm-dialog perm-confirm-dialog">
+      <h3 class="perm-dialog-title">⚠️ 确认开启完全访问？</h3>
+      <p class="perm-dialog-desc">开启后，<strong>Agent 可以直接读写本机所有磁盘的文件</strong>，执行操作前<strong class="danger-text">不再询问你</strong>。请确认你了解其中的风险。可随时切回「默认权限」恢复逐次确认。</p>
+      <div class="perm-dialog-actions">
+        <n-button @click="confirmFullOpen = false">取消</n-button>
+        <n-button type="error" @click="confirmFullAccess">我已了解，开启完全访问</n-button>
+      </div>
+    </div>
+  </n-modal>
 </template>
 
 <style scoped>
@@ -264,6 +359,66 @@ function onKey(e: KeyboardEvent) {
 
 /* ====== 消息行（聊天态） ====== */
 .msg-row { margin-bottom: 12px; }
+
+/* 权限下拉框（知识库开关旁） */
+.perm-group { gap: 6px; }
+.perm-select { width: 108px; }
+.perm-select :deep(.n-base-selection) { border-radius: 8px; }
+/* 完全访问激活态：红色警示文字 */
+.perm-select.perm-full :deep(.n-base-selection-input) { color: #ef4444; font-weight: 600; }
+/* 下拉选项「完全访问」红色 */
+:global(.perm-option-danger) { color: #ef4444 !important; font-weight: 600; }
+
+/* 确认弹窗危险色 */
+.perm-dialog-icon.danger { filter: none; }
+.danger-text { color: #ef4444; }
+
+/* 权限审批弹窗 */
+.perm-dialog {
+  width: min(440px, calc(100vw - 48px));
+  background: var(--bg-elevated, #fff);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.perm-dialog-icon { font-size: 30px; text-align: center; }
+.perm-dialog-title { margin: 0; text-align: center; font-size: 17px; color: var(--text-primary, #222); }
+.perm-dialog-desc { margin: 0; font-size: 13px; color: var(--text-secondary, #888); text-align: center; }
+.perm-dialog-detail {
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.2));
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-app, rgba(128, 128, 128, 0.05));
+}
+.perm-row { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; }
+.perm-k { color: var(--text-muted, #999); flex-shrink: 0; min-width: 32px; padding-top: 2px; }
+.perm-row code { word-break: break-all; color: var(--text-primary, #333); }
+.perm-args { max-height: 140px; overflow-y: auto; white-space: pre-wrap; }
+.perm-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+.perm-dialog-actions :deep(.n-button) { border-radius: 10px; }
+.perm-dialog-hint { margin: 0; font-size: 11px; color: var(--text-muted, #aaa); text-align: center; }
+
+/* 工具调用进度条：助手消息上方的 MCP/技能工具状态 chips */
+.tool-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.tool-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tool-chip.running .tool-spin { display: inline-block; animation: toolSpin 1s linear infinite; color: var(--brand-blue, #3b82f6); }
+.tool-chip.ok .tool-ok { color: #4ade80; }
+.tool-chip.failed { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
+.tool-chip.failed .tool-fail { color: #f87171; }
+@keyframes toolSpin { to { transform: rotate(360deg); } }
 
 /* 消息操作栏：悬浮消息行时显示，位于气泡下方 */
 .msg-actions {

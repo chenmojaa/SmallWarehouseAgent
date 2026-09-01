@@ -46,3 +46,8 @@ class AgentState(TypedDict, total=False):
   reasoning_level_override: str | None
   embedding_model_override: str | None
   step_count: int
+
+  # ---- local-access permission ----
+  # 'default': agent must ask the user before mcp_invoke (local file/cmd access);
+  # 'full':    no asking, filesystem scope = all drives.
+  agent_permission: str

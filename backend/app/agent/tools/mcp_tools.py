@@ -1,22 +1,25 @@
-﻿"""LangChain tool wrappers around locally registered MCP servers.
+"""LangChain tool wrappers around locally registered MCP servers.
 
-We expose two aggregation tools rather than N tools per server:
+We expose three aggregation tools rather than N tools per server:
 
   - ``mcp_list_servers``: list enabled servers (id, description, transport).
-  - ``mcp_invoke``: spawn server, perform JSON-RPC handshake, call one tool.
+  - ``mcp_discover_tools``: list a server's declared tools.
+  - ``mcp_invoke``: call one tool on a server.
 
-This keeps the model-facing tool surface small while still letting the model
-reason about which servers/tools are available. Discovery is cheap because it
-re-uses the same JSON-RPC handshake ``mcp_client.list_tools``.
-
-We do NOT pre-warm a long-lived process per server: spawning once per call is
-simple, robust, and good enough at MVP scale. Hot-path optimisation is an
-explicit follow-up.
+Session reuse: agent turns often invoke the same server 5+ times. Spawning
+npx + JSON-RPC handshake costs 2-3s per call, so we keep one live
+``MCPSession`` per server for the duration of a turn (see ``_sessions`` /
+``reset_mcp_sessions``). Sessions are reset by answer.py at the start of
+each request, so no process outlives its turn by more than the request
+lifetime. A dead process is transparently respawned by MCPSession itself.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
+import re
+import string
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +27,119 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.agent.tools.mcp_client import MCPServerSpec, call_tool, list_tools
+from app.agent.tools.mcp_client import MCPServerSpec, MCPSession
 
 _log = logging.getLogger(__name__)
+
+# 项目根目录（默认权限模式下 filesystem 唯一免询问的授权范围）
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[4])
+
+# 当前请求的权限模式与用户已批准的额外目录。
+# 单用户本地应用，模块级状态足够；answer.py 在每次请求开始时重置。
+_perm: dict = {"mode": "default", "extra_dirs": []}
+
+# 疑似本地路径的值（Windows 盘符 / POSIX 绝对路径 / UNC）
+_PATH_RE = re.compile(r"^([A-Za-z]:[\\/]|[\\/]{2}|/)")
+
+
+def set_permission_mode(mode: str) -> None:
+  """Reset per-request permission context ('default' | 'full').
+
+  Also closes any pooled MCP sessions: the spawned filesystem server was
+  configured with the previous permission's allowed-dirs, so it must not be
+  reused across permission modes.
+  """
+  _perm["mode"] = "full" if mode == "full" else "default"
+  _perm["extra_dirs"] = []
+  reset_mcp_sessions()
+
+
+# ---- Session pool (per-request, per-server) ----
+# key: server_id, value: MCPSession. Reused across mcp_invoke/mcp_discover_tools
+# calls within one agent turn; closed on permission change and turn start.
+_sessions: dict[str, MCPSession] = {}
+
+
+def reset_mcp_sessions() -> None:
+  """Close all pooled sessions (called at the start of each request)."""
+  for sess in _sessions.values():
+    try:
+      sess.close()
+    except Exception:  # pragma: no cover - best-effort cleanup
+      pass
+  _sessions.clear()
+
+
+def _session_for(match: dict) -> MCPSession:
+  """Return (creating if needed) the pooled session for one server."""
+  sid = str(match.get("id") or match.get("name"))
+  sess = _sessions.get(sid)
+  # Spec embeds the CURRENT allowed-dirs; if the session's args differ
+  # (e.g. user just approved an extra drive), rebuild it.
+  spec = _spec_for(match)
+  if sess is not None and sess.spec.args == spec.args:
+    return sess
+  if sess is not None:
+    sess.close()
+  sess = MCPSession(
+    spec,
+    cwd=_PROJECT_ROOT,
+    init_timeout=settings.mcp_init_timeout_sec,
+    call_timeout=settings.mcp_call_timeout_sec,
+  )
+  _sessions[sid] = sess
+  return sess
+
+
+def add_approved_dirs_from(args: dict) -> list[str]:
+  """After user approval, register the drive roots of any paths in tool args.
+
+  E.g. approving list_directory("D:\\photos\\2024") grants D:\\ for the rest
+  of this turn, so follow-up reads inside the same drive are not re-blocked
+  by the filesystem server's allowed-dirs check.
+  """
+  added: list[str] = []
+  for v in (args or {}).values():
+    if not isinstance(v, str) or not _PATH_RE.match(v):
+      continue
+    m = re.match(r"^([A-Za-z]):", v)
+    root = (m.group(1) + ":\\") if m else "/"
+    if root not in _perm["extra_dirs"] and os.path.exists(root):
+      _perm["extra_dirs"].append(root)
+      added.append(root)
+  return added
+
+
+def _all_drive_roots() -> list[str]:
+  """完全访问模式：本机所有可用盘符根目录。"""
+  if os.name == "nt":
+    return [f"{c}:\\" for c in string.ascii_uppercase if os.path.exists(f"{c}:\\")]
+  return ["/"]
+
+
+def _is_filesystem_server(match: dict) -> bool:
+  cmd = " ".join([str(match.get("command") or "")] + [str(a) for a in (match.get("args") or [])])
+  return "server-filesystem" in cmd
+
+
+def _spec_for(match: dict) -> MCPServerSpec:
+  """Build the spawn spec, applying the permission mode to filesystem servers.
+
+  filesystem server takes allowed directories as trailing positional args:
+  npx -y @modelcontextprotocol/server-filesystem <dir> [<dir>...]
+  """
+  spec = MCPServerSpec.from_registry_entry(match)
+  if not _is_filesystem_server(match):
+    return spec
+  pkg_idx = next((i for i, a in enumerate(spec.args) if "server-filesystem" in str(a)), -1)
+  if pkg_idx < 0:
+    return spec
+  if _perm["mode"] == "full":
+    allowed = _all_drive_roots()
+  else:
+    allowed = [_PROJECT_ROOT] + list(_perm["extra_dirs"])
+  spec.args = spec.args[:pkg_idx + 1] + allowed
+  return spec
 
 
 def _registry_path() -> Path:
@@ -93,14 +206,8 @@ def build_mcp_tools() -> list[StructuredTool]:
       return "[mcp error] arguments is not valid JSON: %s" % e
     if not isinstance(args_obj, dict):
       return "[mcp error] arguments must be a JSON object, got %s" % type(args_obj).__name__
-    spec = MCPServerSpec.from_registry_entry(match)
-    return call_tool(
-      spec,
-      tool_name,
-      args_obj,
-      init_timeout=settings.mcp_init_timeout_sec,
-      call_timeout=settings.mcp_call_timeout_sec,
-    )
+    sess = _session_for(match)
+    return sess.call(tool_name, args_obj)
 
   def _discover(server_id: str) -> str:
     match = next((it for it in _read_servers()
@@ -108,12 +215,7 @@ def build_mcp_tools() -> list[StructuredTool]:
                   and it.get("enabled")), None)
     if not match or match.get("transport") != "stdio":
       return "[mcp error] server %r not enabled or unsupported." % server_id
-    spec = MCPServerSpec.from_registry_entry(match)
-    declared = list_tools(
-      spec,
-      init_timeout=settings.mcp_init_timeout_sec,
-      call_timeout=settings.mcp_call_timeout_sec,
-    )
+    declared = _session_for(match).list_tools()
     return json.dumps({"server_id": server_id, "tools": declared, "count": len(declared)},
                       ensure_ascii=False)
 
@@ -130,10 +232,14 @@ def build_mcp_tools() -> list[StructuredTool]:
     func=_invoke,
     name="mcp_invoke",
     description=(
-      "Spawn a stdio MCP server, perform the JSON-RPC handshake, and call one "
-      "named tool. Pass arguments as a JSON string (default {}). Returns the "
-      "textual result from the server. Use mcp_list_servers to find server_id; "
-      "use mcp_discover_tools to learn a server's declared tools."
+      "Call one named tool on an MCP server (the server process stays warm "
+      "across calls within this turn, so repeated calls are fast). Pass "
+      "arguments as a JSON string (default {}). Returns the textual result "
+      "from the server. Use mcp_list_servers to find server_id; use "
+      "mcp_discover_tools to learn a server's declared tools. "
+      "TIP: prefer batch tools when a server offers them (e.g. "
+      "read_multiple_files instead of many read_text_file calls) to reduce "
+      "round trips."
     ),
     args_schema=_MCPInvokeInput,
   ))
