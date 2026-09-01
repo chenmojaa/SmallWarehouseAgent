@@ -11,6 +11,7 @@ import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
+import SettingsDrawer from '@/components/SettingsDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -86,6 +87,9 @@ const siderCollapsed = ref(false)
 function toggleSider() {
   siderCollapsed.value = !siderCollapsed.value
 }
+
+// 设置弹窗
+const settingsOpen = ref(false)
 </script>
 
 <template>
@@ -113,7 +117,7 @@ function toggleSider() {
                 <line x1="3" y1="18" x2="21" y2="18"/>
               </svg>
             </button>
-            <n-text strong style="font-size: 16px">HD</n-text>
+            <n-text strong style="font-size: 16px">smallhouse</n-text>
             <n-text depth="3" style="font-size: 11px">v0.6</n-text>
           </n-space>
           <n-space align="center" :wrap="false">
@@ -126,7 +130,7 @@ function toggleSider() {
               <span v-else class="theme-icon">☾</span>
             </button>
             <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">笔记</n-button></router-link>
-            <router-link to="/settings" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">设置</n-button></router-link>
+            <n-button quaternary size="small" @click="settingsOpen = true">设置</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
             <n-button quaternary size="small" @click="handleLogout">退出</n-button>
           </n-space>
@@ -140,6 +144,7 @@ function toggleSider() {
             <StreamingIndicator />
           </n-layout-content>
         </n-layout>
+        <SettingsDrawer v-model:show="settingsOpen" />
       </n-layout>
     </n-message-provider>
   </n-config-provider>

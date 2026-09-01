@@ -99,7 +99,7 @@ async function doChangePwd() {
   <div class="login-page">
     <div class="login-panel">
       <div class="brand">
-        <div class="brand-logo">HD</div>
+        <div class="brand-logo">smallhouse</div>
         <div class="brand-title">个人知识小助手</div>
         <div class="brand-sub">多模型 · RAG · 飞书同步</div>
       </div>

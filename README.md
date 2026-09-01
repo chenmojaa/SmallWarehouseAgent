@@ -125,23 +125,46 @@ flowchart TB
 
 ### Install
 
-```powershell
-# Backend
-cd backend
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env       # fill LLM_API_KEY + EMBEDDING_API_KEY
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
-
-# Frontend (new shell)
-cd ..\frontend
-npm install
-npm run dev                   # http://127.0.0.1:5174
+```bash
+# One command: install front+back deps, generate .env template, then boot both
+python dev.py
 ```
 
-Open `http://127.0.0.1:5174`. In **Settings -> Add custom model**, paste your OpenAI-compatible `Base URL`, `API Key`, and detected model names, then visit **Knowledge Base** to upload.
+On first run it automatically:
 
-A one-shot launcher is at `scripts/start-all.ps1`.
+1. Creates `backend/.venv` and installs `requirements.txt`
+2. Installs frontend deps (`pnpm` preferred, falls back to `npm`)
+3. Copies `backend/.env.example` -> `backend/.env` if missing
+4. Starts the backend (FastAPI, `http://0.0.0.0:5006`) and frontend (Vite, `http://127.0.0.1:5174`)
+
+Then open `http://127.0.0.1:5174`. In **Settings -> Add custom model**, paste your OpenAI-compatible `Base URL`, `API Key`, and detected model names, then visit **Knowledge Base** to upload.
+
+> Useful subcommands:
+>
+> ```bash
+> python dev.py setup       # install deps only
+> python dev.py backend     # backend only (logs to terminal)
+> python dev.py frontend    # frontend only
+> python dev.py --no-setup  # skip dep check, start directly
+> ```
+>
+> On Windows double-click `start.bat`; on macOS / Linux run `./start.sh`.
+>
+> Manual two-terminal start (optional):
+>
+> ```powershell
+> # Backend
+> cd backend
+> python -m venv .venv
+> .\.venv\Scripts\pip install -r requirements.txt
+> copy .env.example .env       # fill LLM_API_KEY + EMBEDDING_API_KEY
+> .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 5006
+>
+> # Frontend (new shell)
+> cd ..\frontend
+> pnpm install                # or npm install
+> pnpm dev                    # http://127.0.0.1:5174
+> ```
 
 ---
 

@@ -127,23 +127,46 @@ flowchart TB
 
 ### 安装
 
-```powershell
-# Backend
-cd backend
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-copy .env.example .env       # 填奴 LLM_API_KEY + EMBEDDING_API_KEY
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
-
-# Frontend（另开一个终端）
-cd ..\frontend
-npm install
-npm run dev                   # http://127.0.0.1:5174
+```bash
+# 一条命令：自动装前后端依赖 + 生成 .env 模板 + 拉起前后端
+python dev.py
 ```
 
-打开 `http://127.0.0.1:5174`，进入**设置 -> 添加自定义模型**，填入 OpenAI 兼容的 `Base URL` / `API Key` 与检测到的模型名，再进入**知识库**上传文件。
+首次运行会自动完成：
 
-一键启动脚本：`scripts/start-all.ps1`。
+1. 创建 `backend/.venv` 并安装 `requirements.txt`
+2. 安装前端依赖（优先 `pnpm`，回退 `npm`）
+3. 若 `backend/.env` 不存在，从 `.env.example` 复制一份
+4. 启动后端（FastAPI，`http://0.0.0.0:5006`）与前端（Vite，`http://127.0.0.1:5174`）
+
+然后打开 `http://127.0.0.1:5174`，进入**设置 -> 添加自定义模型**，填入 OpenAI 兼容的 `Base URL` / `API Key` 与检测到的模型名，再进入**知识库**上传文件。
+
+> 常用子命令：
+>
+> ```bash
+> python dev.py setup       # 只装依赖，不启动
+> python dev.py backend     # 只启动后端（日志直出终端）
+> python dev.py frontend    # 只启动前端
+> python dev.py --no-setup  # 跳过依赖检查，直接启动
+> ```
+>
+> Windows 可直接双击 `start.bat`；macOS / Linux 运行 `./start.sh`。
+>
+> 手动分步启动（可选）：
+>
+> ```powershell
+> # 后端
+> cd backend
+> python -m venv .venv
+> .\.venv\Scripts\pip install -r requirements.txt
+> copy .env.example .env       # 填入 LLM_API_KEY + EMBEDDING_API_KEY
+> .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 5006
+>
+> # 前端（另开一个终端）
+> cd ..\frontend
+> pnpm install                # 或 npm install
+> pnpm dev                    # http://127.0.0.1:5174
+> ```
 
 ---
 

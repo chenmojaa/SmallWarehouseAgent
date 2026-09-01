@@ -147,11 +147,20 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
 }
 .chat-history-actions {
   padding: 10px 12px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .action-btn {
   height: 36px;
   border: none !important;
   background: transparent !important;
+  border-radius: 12px !important;
+  --n-border-radius: 12px !important;
+}
+.action-btn :deep(.n-button__content) {
+  justify-content: flex-start;
+  width: 100%;
 }
 .action-btn:hover {
   background: var(--hover-bg) !important;
@@ -162,9 +171,6 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
 }
 .new-chat-btn:hover {
   background: var(--active-bg) !important;
-}
-.action-btn + .action-btn {
-  margin-top: 8px;
 }
 .chat-history-header {
   padding: 18px 18px 10px;
