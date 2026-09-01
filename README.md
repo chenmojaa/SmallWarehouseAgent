@@ -2,7 +2,7 @@
 
 <div align="center">
 
-# HD — Personal Knowledge Base Agent
+#  Personal Knowledge Base Agent
 
 **A local-first second brain that turns your messy inbox into a searchable knowledge base, with table-aware OCR, multi-agent RAG, and Feishu wiki sync.**
 
