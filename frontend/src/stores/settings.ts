@@ -28,6 +28,9 @@ interface State {
   apiKey: string
   apiKeySet: boolean
   theme: Theme
+  /** UI: settings drawer visibility. Centralised so any component
+   * (ModelSelector, sidebar, command palette…) can open it. */
+  uiSettingsOpen: boolean
 }
 
 export const useSettingsStore = defineStore('settings', {
@@ -40,6 +43,7 @@ export const useSettingsStore = defineStore('settings', {
     apiKey: '',
     apiKeySet: false,
     theme: 'dark',
+    uiSettingsOpen: false,
   }),
   actions: {
     init() {
@@ -88,6 +92,14 @@ export const useSettingsStore = defineStore('settings', {
     },
     toggleTheme() {
       this.setTheme(this.theme === 'dark' ? 'light' : 'dark')
+    },
+    /** Open the Settings drawer. Safe to call from anywhere. */
+    openSettings() {
+      this.uiSettingsOpen = true
+    },
+    /** Close the Settings drawer. */
+    closeSettings() {
+      this.uiSettingsOpen = false
     },
   },
 })

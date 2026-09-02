@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useModelsStore, type ReasoningLevel } from '@/stores/models'
+import { useSettingsStore } from '@/stores/settings'
 import { NSelect, NButton } from 'naive-ui'
 
 const models = useModelsStore()
-const router = useRouter()
+const settings = useSettingsStore()
 
 const DEBUG = import.meta.env.DEV
 function dbg(...args: unknown[]) { if (DEBUG) console.debug("[ModelSelector]", ...args) }
@@ -75,7 +75,10 @@ function onReasoningChange(v: ReasoningLevel) {
 }
 
 function gotoSettings() {
-  router.push({ name: "settings" })
+  // Settings is a drawer mounted in App.vue (not a /settings route),
+  // so router.push({ name: 'settings' }) silently no-ops. Toggle the
+  // store flag so the drawer opens for the user.
+  settings.openSettings()
 }
 </script>
 

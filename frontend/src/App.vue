@@ -106,11 +106,8 @@ function toggleTheme() {
 
 const siderCollapsed = ref(false)
 function toggleSider() {
-  siderCollapsed.value = !siderCollapsed.value
-}
-
-// 设置弹窗
-const settingsOpen = ref(false)
+  siderCollapsed.value = !siderCollapsed.value// Settings drawer state lives in the Pinia store (defined above)
+// so any component can open it via settings.openSettings().
 const paletteOpen = ref(false)
 </script>
 
@@ -173,7 +170,7 @@ const paletteOpen = ref(false)
             <StreamingIndicator />
           </n-layout-content>
         </n-layout>
-        <SettingsDrawer v-model:show="settingsOpen" />
+        <SettingsDrawer v-model:show="settings.uiSettingsOpen" />
       </n-layout>
       <CommandPalette v-model:show="paletteOpen" />
     </n-message-provider>
