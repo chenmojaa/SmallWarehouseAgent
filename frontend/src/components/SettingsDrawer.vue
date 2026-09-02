@@ -11,6 +11,7 @@ import {
   NInput, NButton, NTag, NEmpty, NPopconfirm, NSpin, NSwitch, NModal,
   useMessage,
 } from 'naive-ui'
+import SettingsOperations from './SettingsOperations.vue'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
@@ -22,13 +23,14 @@ const message = useMessage()
 
 const t = _t
 
-const section = ref<'profile' | 'models' | 'knowledge' | 'appearance'>('profile')
+const section = ref<'profile' | 'models' | 'knowledge' | 'appearance' | 'operations'>('profile')
 
 const sectionTabs = computed(() => [
   { key: 'profile', label: t('settings.profile', '个人中心', 'Profile') },
   { key: 'models', label: t('settings.models', '自定义模型', 'Custom Models') },
   { key: 'knowledge', label: t('settings.knowledge', '知识库配置', 'Knowledge Base') },
   { key: 'appearance', label: t('settings.appearance', '外观与语言', 'Appearance & Language') },
+  { key: 'operations', label: t('settings.operations', '运维与权限', 'Operations & Permissions') },
 ])
 
 watch(() => props.show, (v) => {
@@ -360,7 +362,10 @@ async function doDeleteAccount() {
               <button class="lang-btn" :class="{ active: lang === 'en' }" @click="setLang('en')">English</button>
             </div>
           </div>
+        </div>        <div v-if="section === 'operations'" class="section">
+          <SettingsOperations />
         </div>
+
       </div>
 
       <!-- Delete account confirmation modal -->
