@@ -1,13 +1,13 @@
-"""Hybrid search: vector (Chroma) + keyword (FTS5) -> dedupe + rerank."""
+﻿"""Hybrid search: vector (Chroma) + keyword (FTS5) -> dedupe + rerank."""
 from __future__ import annotations
 
 import logging
 import re
+from sqlmodel import text
 
 from app.embeddings.factory import embed_texts
 from app.storage.vector import search as vector_search
-
-# Relevance thresholds. Anything below these is treated as noise and
+from app.storage.db import get_engine
 # dropped before the LLM sees it, so turns like "my name is X" no
 # longer get a fake citation card.
 MIN_FINAL_SCORE = 0.18   # 0.7 * vec + 0.3 * kw
@@ -206,4 +206,131 @@ def hybrid_search_with_expansion(query, top_k=5, **kwargs):
 
   if kwargs.get("rerank") and len(results) > 1:
     results = rerank(query, results)
+  # Parent-child dedup + context window (always on; pass expand_window=0 to opt out).
+  expand_window = kwargs.pop("expand_window", 2)
+  if expand_window != 0 and results:
+    results = expand_search_results(results, window=expand_window)
   return results[:top_k]
+
+# === Parent-child context expansion ===
+def _fetch_adjacent_chunks_from_fts(note_id: str, center_index: int, window: int) -> dict[int, str]:
+  """Pull adjacent chunks (chunk_index in [center-window, center+window]) from FTS5.
+
+  Used by `merge_needs` to expand the visible context around a matched child chunk
+  so the LLM sees the surrounding text instead of a single 500-char slice. The
+  FTS5 store is the source of truth for chunk content because it does not require
+  a re-embed roundtrip the way the Chroma store would.
+  """
+  if window <= 0:
+    return {center_index: ""}
+  try:
+    with get_engine().begin() as conn:
+      rows = conn.execute(text(
+        "SELECT chunk_index, content FROM chunk_fts "
+        "WHERE note_id = :nid AND chunk_index BETWEEN :lo AND :hi"
+      ), {"nid": note_id, "lo": max(0, center_index - window), "hi": center_index + window}).all()
+  except Exception:
+    return {center_index: ""}
+  return {int(r.chunk_index): str(r.content or "") for r in rows}
+
+
+def _bucket_hits_by_note(hits: list[dict]) -> dict[str, list[dict]]:
+  out: dict[str, list[dict]] = {}
+  for h in hits:
+    out.setdefault(h.get("note_id") or "?", []).append(h)
+  for v in out.values():
+    v.sort(key=lambda x: int(x.get("chunk_index") or 0))
+  return out
+
+
+def merge_neighboring_hits(hits: list[dict], window: int = 2, max_keep: int = 50) -> list[dict]:
+  """Merge hits whose chunks sit within `window` of each other inside the same note.
+
+  Effect: a single user-facing citation card now carries the surrounding context
+  (parent-window) around the matched child chunk, instead of returning N near-
+  duplicate slices from the same document. The highest-scoring child's score wins,
+  so dedup never buries a strongly-matched child behind a weakly-matched sibling.
+
+  Args:
+    hits: hybrid_search output, sorted by final_score desc.
+    window: number of adjacent chunks to expand on each side.
+    max_keep: hard cap so we never materialize more than this many expanded hits.
+
+  Returns a new list; the input is not mutated.
+  """
+  if not hits:
+    return []
+  if len(hits) <= 1:
+    # still expand the lone hit so the LLM gets a wider window
+    out = []
+    for h in hits[:max_keep]:
+      out.append(_expand_single(h, window))
+    return out
+
+  # First pass: coalesce neighbors inside each note.
+  coalesced: list[dict] = []
+  for note_id, group in _bucket_hits_by_note(hits).items():
+    used = [False] * len(group)
+    for i, anchor in enumerate(group):
+      if used[i]:
+        continue
+      used[i] = True
+      cluster = [anchor]
+      for j in range(i + 1, len(group)):
+        if used[j]:
+          continue
+        if int(group[j]["chunk_index"]) - int(cluster[-1]["chunk_index"]) <= window:
+          cluster.append(group[j])
+          used[j] = True
+      # collapse cluster into one record; highest final_score wins as the canonical child
+      cluster.sort(key=lambda x: x.get("final_score") or 0, reverse=True)
+      winner = cluster[0]
+      siblings = cluster[1:]
+      winner = dict(winner)
+      winner["sibling_chunk_indices"] = [int(s["chunk_index"]) for s in siblings]
+      winner["merged_children"] = len(cluster)
+      coalesced.append(winner)
+
+  # Second pass: rank and trim.
+  coalesced.sort(key=lambda h: h.get("final_score") or 0, reverse=True)
+  coalesced = coalesced[:max_keep]
+
+  # Third pass: actually expand with sibling context.
+  return [_expand_single(h, window) for h in coalesced]
+
+
+def _expand_single(hit: dict, window: int) -> dict:
+  """Replace hit['text'] with the child text + adjacent chunks from FTS5.
+
+  The original matched text is kept under hit['matched_text'] so the frontend
+  can still highlight what was actually relevant if it wants to.
+  """
+  hit = dict(hit)
+  note_id = hit.get("note_id") or ""
+  try:
+    center = int(hit.get("chunk_index") or 0)
+  except Exception:
+    center = 0
+  original = hit.get("text") or ""
+  hit["matched_text"] = original
+  if window <= 0 or not note_id:
+    return hit
+  adj = _fetch_adjacent_chunks_from_fts(note_id, center, window)
+  if not adj:
+    return hit
+  ordered = sorted(adj.items())
+  parts = [content for _, content in ordered if content]
+  hit["text"] = "\n\n".join(parts)
+  hit["context_window"] = window
+  hit["context_chunk_count"] = len(adj)
+  return hit
+
+
+def expand_search_results(hits: list[dict], window: int = 2) -> list[dict]:
+  """Public entry: dedupe + expand child hits with their surrounding context.
+
+  Tuned defaults: window=2 means each returned citation shows ~5 chunks total
+  (~2500 chars of context) which is the right scale for an LLM to ground
+  an answer. Callers can opt out by passing window=0.
+  """
+  return merge_neighboring_hits(hits, window=window)

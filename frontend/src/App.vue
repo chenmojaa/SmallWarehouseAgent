@@ -87,8 +87,10 @@ watch(isLoginPage, (nowLogin, wasLogin) => {
   }
 })
 
-function handleLogout() {
-  auth.logout()
+async function handleLogout() {
+  // Server-side revoke first so the old token can't be reused on
+  // another device after the user clicks 'logout'.
+  try { await auth.logout() } catch {}
   router.replace('/login')
 }
 
@@ -172,8 +174,8 @@ const paletteOpen = ref(false)
           </n-layout-content>
         </n-layout>
         <SettingsDrawer v-model:show="settingsOpen" />
-      <CommandPalette v-model:show="paletteOpen" />
       </n-layout>
+      <CommandPalette v-model:show="paletteOpen" />
     </n-message-provider>
   </n-config-provider>
 </template>
