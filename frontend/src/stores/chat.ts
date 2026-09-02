@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { chatStream, respondPermission, stripThink, type ChatMessage, type Citation, type IngestResult, type ReportResult, type ToolEvent, type PermissionEvent } from '@/api/chat'
+import { chatStream, respondPermission, stripThink, type ChatMessage, type Citation, type IngestResult, type ReportResult, type ToolEvent, type PermissionEvent, type PlanStepItem, type PlanEvent } from '@/api/chat'
 import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
@@ -23,6 +23,9 @@ interface Msg extends ChatMessage {
   ingest?: IngestResult
   report?: ReportResult
   toolCalls?: ToolCallItem[]
+  // 任务规划：计划摘要 + 步骤执行状态（plan-strip 渲染）
+  planSummary?: string
+  planSteps?: PlanStepItem[]
 }
 export interface PipelineStage {
   stage: "router" | "rag_search" | "llm_stream" | "agent"
@@ -32,6 +35,11 @@ export interface PipelineStage {
   intent?: string
   agent?: string
   iterations?: number
+  steps?: number
+  plan_summary?: string
+  step?: number | null
+  total_steps?: number
+  query?: string
   at: number
 }
 
@@ -42,6 +50,8 @@ interface State {
   isStreaming: boolean
   error: string | null
   useRag: boolean
+  // 任务规划开关：research 意图先分解子查询再检索（localStorage 持久化）
+  usePlanner: boolean
   abortCtl: AbortController | null
   streamingSessionId: string | null
   streamingMessageId: string | null
@@ -69,6 +79,9 @@ export const useChatStore = defineStore("chat", {
     messages: [],
     error: null,
     useRag: true,
+    usePlanner: ((): boolean => {
+      try { return localStorage.getItem('planner-disabled') !== '1' } catch { return true }
+    })(),
     abortCtl: null,
     streamingSessionId: null,
     streamingMessageId: null,
@@ -85,6 +98,13 @@ export const useChatStore = defineStore("chat", {
   },
   actions: {
     toggleRag() { this.useRag = !this.useRag },
+    togglePlanner() {
+      this.usePlanner = !this.usePlanner
+      try {
+        if (this.usePlanner) localStorage.removeItem('planner-disabled')
+        else localStorage.setItem('planner-disabled', '1')
+      } catch { /* localStorage 不可用时仅内存生效 */ }
+    },
     setAgentPermission(mode: 'default' | 'full') {
       this.agentPermission = mode
       try {
@@ -185,6 +205,7 @@ export const useChatStore = defineStore("chat", {
           provider: provider ?? null,
           model: model ?? null,
           use_rag: this.useRag,
+          use_planner: this.usePlanner,
           session_id: this.sessionId,
           base_url: baseUrl ?? null,
           api_key: apiKey ?? null,
@@ -216,6 +237,33 @@ export const useChatStore = defineStore("chat", {
                 pending.snippet = t.snippet
               } else {
                 asstMsg.toolCalls.push({ name: t.name, status: t.ok ? 'ok' : 'failed', snippet: t.snippet })
+              }
+            }
+            const idx = this.messages.findIndex(m => m.id === asstMsg.id)
+            if (idx >= 0) this.messages[idx] = { ...asstMsg }
+          } else if (ev.type === 'plan' && ev.data && typeof ev.data === 'object') {
+            // 任务规划进度：created -> step_done* -> replan* -> done
+            const p = ev.data as PlanEvent
+            if (p.phase === 'created' && p.queries?.length) {
+              asstMsg.planSummary = p.summary || ''
+              asstMsg.planSteps = p.queries.map(q => ({ query: q, status: 'pending' as const }))
+              // 计划生成后第一步立即视为执行中
+              if (asstMsg.planSteps.length) asstMsg.planSteps[0].status = 'running'
+            } else if (p.phase === 'step_done' && asstMsg.planSteps && typeof p.index === 'number') {
+              const st = asstMsg.planSteps[p.index]
+              if (st) { st.status = 'done'; st.hits = p.hits ?? 0 }
+              const next = asstMsg.planSteps[p.index + 1]
+              if (next && next.status === 'pending') next.status = 'running'
+            } else if (p.phase === 'replan' && p.query) {
+              // 动态补缺：追加一个「补检索」chip
+              if (!asstMsg.planSteps) asstMsg.planSteps = []
+              asstMsg.planSteps.push({ query: p.query, status: 'done', hits: p.hits ?? 0, replan: true })
+            } else if (p.phase === 'done') {
+              // 收尾：所有未完成步骤标记完成（计划提前达标终止的情形）
+              if (asstMsg.planSteps) {
+                for (const st of asstMsg.planSteps) {
+                  if (st.status !== 'done') st.status = 'done'
+                }
               }
             }
             const idx = this.messages.findIndex(m => m.id === asstMsg.id)

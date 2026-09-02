@@ -1,10 +1,18 @@
-"""LangGraph graph: router -> (retrieve|research|ingest|report).
+"""LangGraph graph: router -> (retrieve | planner -> execute_plan* -> replan* | ingest | report).
 
 Per OPTIMIZATION.md section 2.4. The router classifies intent and rewrites the
-query for downstream nodes. ingest/report terminate at END. Retrieval nodes
-populate ``retrieved_chunks`` and also terminate at END; chat.py then streams
-the answer with ``answer_node_stream`` so reasoning models do not have to pass
-through a separate structured-output call.
+query for downstream nodes. research intent runs the plan-and-execute loop:
+
+  planner -> execute_plan (one sub-query per pass, loops until the plan is
+  spent or enough material is collected) -> replan (dynamic follow-up rounds
+  when still short) -> END
+
+Because execute_plan / replan are loop nodes, graph.astream emits one event
+per step, which chat.py forwards as per-step SSE progress (no more black-box
+research). ingest/report terminate at END; the retrieve node (plain chat
+intent) populates ``retrieved_chunks`` and terminates at END; chat.py then
+streams the answer with ``answer_node_stream`` so reasoning models do not
+have to pass through a separate structured-output call.
 
 HD_USE_GRAPH=false (env) keeps the legacy direct-call path in chat.py active;
 default is graph-driven.
@@ -20,17 +28,53 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.agent.state import AgentState
 from app.config import settings
 from app.agent.nodes.ingest import ingest_node
+from app.agent.nodes.planner import planner_node
 from app.agent.nodes.report import report_node
-from app.agent.nodes.research import research_node
+from app.agent.nodes.research import execute_plan_node, replan_node
 from app.agent.nodes.retrieve import retrieve_node
 from app.agent.nodes.router import route_by_intent, router_node
+
+
+def route_after_planner(state: AgentState) -> str:
+  """有计划 -> 逐步执行；空计划（规划失败/关闭）-> 直接 replan 兜底。"""
+  return "execute_plan" if (state.get("plan") or []) else "replan"
+
+
+def _need_more(state: AgentState) -> bool:
+  """材料不足且 replan 还有预算且没卡住。"""
+  target = max(1, int(settings.research_target_chunks))
+  collected = len(state.get("retrieved_chunks") or [])
+  replans = len(state.get("research_notes") or [])
+  max_replans = max(0, int(settings.research_max_iter))
+  return (collected < target and replans < max_replans
+          and not state.get("replan_stalled"))
+
+
+def route_after_step(state: AgentState) -> str:
+  """计划步执行后的去向：继续执行下一步 / 转 replan / 结束。"""
+  plan = state.get("plan") or []
+  cursor = int(state.get("plan_cursor") or 0)
+  target = max(1, int(settings.research_target_chunks))
+  collected = len(state.get("retrieved_chunks") or [])
+  if cursor < len(plan) and collected < target:
+    return "execute_plan"
+  if _need_more(state):
+    return "replan"
+  return END
+
+
+def route_after_replan(state: AgentState) -> str:
+  """replan 一轮后的去向：继续补缺 / 结束。"""
+  return "replan" if _need_more(state) else END
 
 
 def _build_workflow() -> StateGraph:
   g = StateGraph(AgentState)
   g.add_node("router", router_node)
+  g.add_node("planner", planner_node)
+  g.add_node("execute_plan", execute_plan_node)
+  g.add_node("replan", replan_node)
   g.add_node("retrieve", retrieve_node)
-  g.add_node("research", research_node)
   g.add_node("ingest", ingest_node)
   g.add_node("report", report_node)
 
@@ -38,12 +82,26 @@ def _build_workflow() -> StateGraph:
   g.add_conditional_edges("router", route_by_intent, {
     "chat": "retrieve",
     "chat_no_rag": END,
-    "research": "research",
+    "research": "planner",       # 任务规划：复杂问题先分解再检索
     "ingest": "ingest",
     "report": "report",
   })
+  g.add_conditional_edges("planner", route_after_planner, {
+    "execute_plan": "execute_plan",
+    "replan": "replan",
+  })
+  # 循环节点：execute_plan -> execute_plan / replan / END
+  g.add_conditional_edges("execute_plan", route_after_step, {
+    "execute_plan": "execute_plan",
+    "replan": "replan",
+    END: END,
+  })
+  # replan -> replan / END
+  g.add_conditional_edges("replan", route_after_replan, {
+    "replan": "replan",
+    END: END,
+  })
   g.add_edge("retrieve", END)
-  g.add_edge("research", END)
   g.add_edge("ingest", END)
   g.add_edge("report", END)
   return g

@@ -81,6 +81,7 @@ def _build_messages(state: AgentState):
     question=question,
     summary=state.get("summary") or "",
     profile=state.get("profile") or None,
+    memory_facts=state.get("memory_facts") or None,
   )
   if inventory:
     from langchain_core.messages import SystemMessage

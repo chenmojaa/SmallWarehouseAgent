@@ -129,6 +129,15 @@ function onKey(e: KeyboardEvent) {
           :bordered="false"
         />
         <div class="input-toolbar">
+          <button
+            type="button"
+            class="plan-toggle"
+            :class="{ on: chat.usePlanner }"
+            :title="chat.usePlanner ? '任务规划已开启：复杂问题会先分解为检索计划再执行' : '任务规划已关闭：直接检索，不分解子查询'"
+            @click="chat.togglePlanner()"
+          >
+            <span>Plan</span>
+          </button>
           <div class="rag-group">
             <span class="rag-label">知识库</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
@@ -168,6 +177,28 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
+          <!-- 任务规划进度条：计划步骤 pending/running/done + 命中数 -->
+          <div v-if="m.role === 'assistant' && m.planSteps && m.planSteps.length" class="plan-strip">
+            <div class="plan-head">
+              <span class="plan-label">检索计划</span>
+              <span v-if="m.planSummary" class="plan-summary">{{ m.planSummary }}</span>
+            </div>
+            <div class="plan-steps">
+              <span
+                v-for="(s, i) in m.planSteps"
+                :key="i"
+                class="plan-chip"
+                :class="[s.status, { replan: s.replan }]"
+                :title="s.query + (s.hits != null ? '（命中 ' + s.hits + ' 条）' : '')"
+              >
+                <span v-if="s.status === 'running'" class="tool-spin">◌</span>
+                <span v-else-if="s.status === 'done'" class="tool-ok">{{ s.replan ? '+' : '✓' }}</span>
+                <span v-else class="plan-pending-num">{{ i + 1 }}</span>
+                <span class="plan-chip-query">{{ s.replan ? '补检索：' : '' }}{{ s.query.length > 18 ? s.query.slice(0, 18) + '…' : s.query }}</span>
+                <span v-if="s.status === 'done' && s.hits != null" class="plan-chip-hits">{{ s.hits }}</span>
+              </span>
+            </div>
+          </div>
           <!-- 工具调用进度条：MCP / 技能工具的 running -> ok/failed 状态 -->
           <div v-if="m.role === 'assistant' && m.toolCalls && m.toolCalls.length" class="tool-strip">
             <span
@@ -243,6 +274,15 @@ function onKey(e: KeyboardEvent) {
           :bordered="false"
         />
         <div class="input-toolbar">
+          <button
+            type="button"
+            class="plan-toggle"
+            :class="{ on: chat.usePlanner }"
+            :title="chat.usePlanner ? '任务规划已开启：复杂问题会先分解为检索计划再执行' : '任务规划已关闭：直接检索，不分解子查询'"
+            @click="chat.togglePlanner()"
+          >
+            <span>Plan</span>
+          </button>
           <div class="rag-group">
             <span class="rag-label">知识库</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
@@ -419,6 +459,64 @@ function onKey(e: KeyboardEvent) {
 .tool-chip.failed { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
 .tool-chip.failed .tool-fail { color: #f87171; }
 @keyframes toolSpin { to { transform: rotate(360deg); } }
+
+/* Plan 开关按钮：输入框工具栏左侧，开启高亮 / 关闭置灰 */
+.plan-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 500; line-height: 18px;
+  color: var(--text-muted, #888);
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.plan-toggle:hover { color: var(--text-secondary, #aaa); }
+.plan-toggle.on {
+  color: var(--brand-blue, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.10);
+}
+
+/* 任务规划进度条：计划摘要 + 步骤 chips（复用 tool-chip 风格） */
+.plan-strip {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  max-width: 520px;
+}
+.plan-head { display: flex; align-items: baseline; gap: 8px; }
+.plan-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+  color: var(--brand-blue, #3b82f6);
+  flex-shrink: 0;
+}
+.plan-summary {
+  font-size: 12px; color: var(--text-secondary, #aaa);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plan-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plan-chip.running { color: var(--brand-blue, #3b82f6); border-color: rgba(59, 130, 246, 0.4); }
+.plan-chip.running .tool-spin { display: inline-block; animation: toolSpin 1s linear infinite; }
+.plan-chip.done .tool-ok { color: #4ade80; }
+.plan-chip.replan { border-style: dashed; }
+.plan-pending-num { font-size: 11px; color: var(--text-muted, #777); }
+.plan-chip-query { overflow: hidden; text-overflow: ellipsis; }
+.plan-chip-hits {
+  font-size: 11px; color: #4ade80;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 消息操作栏：悬浮消息行时显示，位于气泡下方 */
 .msg-actions {

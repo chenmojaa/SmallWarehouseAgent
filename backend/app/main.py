@@ -18,6 +18,7 @@ from app.api.feishu import router as feishu_router
 from app.api.skills import router as skills_router
 from app.api.auth import router as auth_router
 from app.api.mcp import router as mcp_router
+from app.api.memory import router as memory_router
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -125,6 +126,7 @@ app.include_router(custom_models_router, prefix="/api")
 app.include_router(feishu_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(memory_router, prefix="/api")
 
 app.include_router(mcp_router, prefix='/api')
 

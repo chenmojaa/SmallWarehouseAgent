@@ -44,7 +44,21 @@ const label = computed<string>(() => {
       : s.agent === "report"  ? "生成周报中..." : "agent 运行中"
   }
   if (s.stage === "agent" && s.status === "done") {
-    if (s.agent === "research") return "研究完成 (" + (s.iterations || 0) + " 轮)"
+    if (s.agent === "planner") {
+      return s.steps && s.steps > 0
+        ? "已制定 " + s.steps + " 步检索计划"
+        : "无需分解，直接检索"
+    }
+    if (s.agent === "research") {
+      // 计划逐步执行：显示当前步骤进度
+      if (s.step && s.total_steps) {
+        const q = s.query ? "：" + (s.query.length > 14 ? s.query.slice(0, 14) + "…" : s.query) : ""
+        return "执行计划 " + s.step + "/" + s.total_steps + q
+      }
+      if (s.query) return "补检索中：" + (s.query.length > 16 ? s.query.slice(0, 16) + "…" : s.query)
+      if (s.iterations != null) return "研究完成 (" + s.iterations + " 轮)"
+      return "多轮检索中..."
+    }
     if (s.agent === "ingest")  return "入库完成"
     if (s.agent === "report")  return "周报已生成"
   }

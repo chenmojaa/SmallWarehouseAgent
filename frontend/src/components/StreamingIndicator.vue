@@ -42,6 +42,11 @@ const label = computed<string>(() => {
            s.agent === 'report'  ? '\u751f\u6210\u5468\u62a5\u4e2d...' : 'agent \u8fd0\u884c\u4e2d'
   }
   if (s.stage === 'agent' && s.status === 'done') {
+    if (s.agent === 'planner') {
+      return s.steps && s.steps > 0
+        ? '\u5df2\u5236\u5b9a ' + s.steps + ' \u6b65\u68c0\u7d22\u8ba1\u5212'
+        : '\u65e0\u9700\u5206\u89e3\uff0c\u76f4\u63a5\u68c0\u7d22'
+    }
     if (s.agent === 'research') return '\u7814\u7a76\u5b8c\u6210 (' + (s.iterations || 0) + ' \u8f6e)'
     if (s.agent === 'ingest')  return '\u5165\u5e93\u5b8c\u6210'
     if (s.agent === 'report')  return '\u5468\u62a5\u751f\u6210\u5b8c\u6210'

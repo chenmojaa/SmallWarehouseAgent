@@ -20,6 +20,7 @@ export interface ChatRequest {
   provider?: string | null
   model?: string | null
   use_rag?: boolean
+  use_planner?: boolean | null
   session_id?: string | null
   base_url?: string | null
   api_key?: string | null
@@ -37,6 +38,28 @@ export interface StageEvent {
   intent?: string
   rewritten_query?: string
   agent?: string
+  iterations?: number
+  steps?: number
+  plan_summary?: string
+  step?: number | null
+  total_steps?: number
+  query?: string
+}
+
+export interface PlanStepItem {
+  query: string
+  status: "pending" | "running" | "done"
+  hits?: number
+  replan?: boolean
+}
+
+export interface PlanEvent {
+  phase: "created" | "step_done" | "replan" | "done"
+  summary?: string
+  queries?: string[]
+  index?: number
+  query?: string
+  hits?: number
   iterations?: number
 }
 
@@ -81,9 +104,9 @@ export interface PermissionEvent {
 }
 
 export interface ChatStreamEvent {
-  type: "session" | "delta" | "citations" | "done" | "error" | "stage" | "ingest" | "report" | "tool" | "permission"
+  type: "session" | "delta" | "citations" | "done" | "error" | "stage" | "ingest" | "report" | "tool" | "permission" | "plan"
   session_id?: string
-  data?: string | Citation[] | StageEvent | IngestResult | ReportResult | ToolEvent | PermissionEvent
+  data?: string | Citation[] | StageEvent | IngestResult | ReportResult | ToolEvent | PermissionEvent | PlanEvent
 }
 
 /** 回复 Agent 的本地访问权限请求（允许 / 拒绝） */
@@ -107,6 +130,7 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
     provider: req.provider || undefined,
     model: req.model || undefined,
     use_rag: req.use_rag !== false,
+    use_planner: req.use_planner === undefined ? undefined : req.use_planner,
     session_id: req.session_id || undefined,
     base_url: req.base_url || undefined,
     api_key: req.api_key || undefined,
@@ -132,6 +156,8 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
       try { yield { type: "tool", data: JSON.parse(ev.data) } } catch {}
     } else if (ev.event === "permission") {
       try { yield { type: "permission", data: JSON.parse(ev.data) } } catch {}
+    } else if (ev.event === "plan") {
+      try { yield { type: "plan", data: JSON.parse(ev.data) } } catch {}
     } else if (ev.event === "error") {
       yield { type: "error", data: ev.data }
     } else if (ev.event === "ingest") {

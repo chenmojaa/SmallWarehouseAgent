@@ -1,12 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Research agent: multi-round retrieval + follow-up query generation.
+"""Research nodes: plan execution + dynamic replanning (plan-and-execute).
 
-Design (per OPTIMIZATION.md section 2.6):
-  - Loop up to MAX_ITER (default 3) rounds, each round: hybrid_search -> dedupe -> accumulate.
-  - Stop early when collected chunks >= research_target_chunks (default 8).
-  - When more chunks are needed, ask the router-tier model for one follow-up query
-    that fills the gap based on what titles/snippets we already have.
-  - On any LLM failure, return whatever was collected so far (graceful degradation).
+图结构（graph.py）：
+  planner → execute_plan (循环，每步一个子查询) → replan (循环，动态补缺) → END
+
+拆成两个 LangGraph 节点的原因：循环节点每执行一步就向 astream 产出一次
+事件，chat.py 因此能逐步流式推送「计划 2/4：xxx」进度，而不是等整个
+研究完成后才发一次汇总（旧版黑盒问题）。
+
+  - ``execute_plan_node``: 执行 plan[plan_cursor] 的一次混合检索，给每个
+    新 chunk 标注 ``matched_query``（命中的子查询），推进 cursor。
+  - ``replan_node``: 计划执行完仍不足 target 时的动态补缺——基于已有
+    材料让廉价模型生成下一个检索角度（原启发式 follow-up 的泛化）。
+    生成不出新查询时置 ``replan_stalled`` 终止循环。
+
+预算设计（修复旧版冲突）：
+  - 计划步数上限 = planner_max_steps（默认 4），不再被 research_max_iter
+    截断——旧版 plan_queries[:max_iter] 会把 4 步计划砍成 3 步。
+  - replan 轮数上限 = research_max_iter（默认 3）。
 """
 from __future__ import annotations
 
@@ -37,6 +48,15 @@ def _seen_key(c: dict[str, Any]) -> tuple[str, int]:
     return (str(c.get("note_id") or ""), int(c.get("chunk_index") or -1))
 
 
+def _search(q: str, api_key, base_url) -> list[dict[str, Any]]:
+    """hybrid_search wrapper: never raises, logs and returns [] on failure."""
+    try:
+        return hybrid_search(q, top_k=5, api_key=api_key, base_url=base_url, model=None)
+    except Exception as e:
+        _log.warning("research: hybrid_search failed for q=%r: %s", q[:60], e)
+        return []
+
+
 def _generate_followup(collected: list[dict[str, Any]], original: str,
                        chat) -> str | None:
     """Ask the cheap router-tier model for the next angle to search."""
@@ -55,62 +75,114 @@ def _generate_followup(collected: list[dict[str, Any]], original: str,
         return None
 
 
-def research_node(state: AgentState) -> dict:
-    """Multi-round retrieval. Returns accumulated chunks + research metadata."""
-    query = (state.get("rewritten_query") or state.get("query") or "").strip()
-    if not query:
-        return {"retrieved_chunks": [], "research_iterations": 0,
-                "research_notes": [], "step_count": state.get("step_count", 0) + 1}
+def _followup_model(state: AgentState):
+    """Build the cheap follow-up model, or None if init fails."""
+    try:
+        return _build_model(
+            provider=None,
+            model=settings.router_model or state.get("model_override"),
+            api_key=state.get("api_key_override"),
+            base_url=settings.router_base_url or state.get("base_url_override") or None,
+            reasoning_level=None,
+        )
+    except Exception as e:
+        _log.warning("research: follow-up model init failed: %s", e)
+        return None
 
-    max_iter = max(1, int(settings.research_max_iter))
-    target = max(1, int(settings.research_target_chunks))
-    api_key = state.get("api_key_override")
-    base_url = state.get("base_url_override")
 
-    collected: list[dict[str, Any]] = []
-    seen: set[tuple[str, int]] = set()
-    queries: list[str] = []
-    iterations_done = 0
+def execute_plan_node(state: AgentState) -> dict:
+    """Execute ONE plan step: hybrid search for plan[plan_cursor].
 
-    for i in range(max_iter):
-        if i == 0:
-            q = query
-        elif queries:
-            q = queries[i] if i < len(queries) else queries[-1]
-        else:
-            break
-        try:
-            hits = hybrid_search(q, top_k=5, api_key=api_key, base_url=base_url, model=None)
-        except Exception as e:
-            _log.warning("research: hybrid_search failed for q=%r: %s", q[:60], e)
-            hits = []
-        new_chunks = [c for c in hits if _seen_key(c) not in seen]
-        for c in new_chunks:
-            seen.add(_seen_key(c))
-        collected.extend(new_chunks)
-        iterations_done = i + 1
-        if len(collected) >= target:
-            break
-        # Need more material; try to get a follow-up angle.
-        try:
-            chat = _build_model(
-                provider=None,
-                model=settings.router_model or state.get("model_override"),
-                api_key=state.get("api_key_override"),
-                base_url=settings.router_base_url or state.get("base_url_override") or None,
-                reasoning_level=None,
-            )
-        except Exception as e:
-            _log.warning("research: follow-up model init failed: %s", e)
-            break
-        next_q = _generate_followup(collected, query, chat)
-        if not next_q or next_q == q or next_q in queries:
-            break
-        queries.append(next_q)
+    Each new chunk is tagged with ``matched_query`` so the answer prompt can
+    tell which sub-question each piece of reference material answers.
+    """
+    plan = state.get("plan") or []
+    cursor = int(state.get("plan_cursor") or 0)
+    if cursor >= len(plan):
+        # Defensive: routing should never send us here with a spent plan.
+        return {"step_count": state.get("step_count", 0) + 1}
 
+    q = str(plan[cursor].get("query") or "").strip()
+    if not q:
+        # Skip empty step but still advance the cursor so the loop terminates.
+        return {"plan_cursor": cursor + 1,
+                "step_count": state.get("step_count", 0) + 1}
+
+    collected = list(state.get("retrieved_chunks") or [])
+    seen = {_seen_key(c) for c in collected}
+    hits = _search(q, state.get("api_key_override"), state.get("base_url_override"))
+    new_chunks = []
+    for c in hits:
+        if _seen_key(c) in seen:
+            continue
+        seen.add(_seen_key(c))
+        c["matched_query"] = q      # 标注：该 chunk 由哪个子查询命中
+        new_chunks.append(c)
+    collected.extend(new_chunks)
+
+    plan_status = list(state.get("plan_status") or [])
+    plan_status.append({"query": q, "hits": len(new_chunks)})
+
+    _log.info("research: plan step %d/%d q=%r hits=%d total=%d",
+              cursor + 1, len(plan), q[:60], len(new_chunks), len(collected))
     return {
         "retrieved_chunks": collected,
-        "research_iterations": iterations_done,
-        "research_notes": queries,
+        "plan_cursor": cursor + 1,
+        "plan_status": plan_status,
+        "research_iterations": int(state.get("research_iterations") or 0) + 1,
+        "step_count": state.get("step_count", 0) + 1,
+    }
+
+
+def replan_node(state: AgentState) -> dict:
+    """Dynamic replanning: one follow-up retrieval round when material is short.
+
+    Also serves as the no-plan fallback path (planner disabled / failed):
+    the first round searches the original query directly, subsequent rounds
+    ask the cheap model for the missing angle.
+    """
+    query = (state.get("rewritten_query") or state.get("query") or "").strip()
+    if not query:
+        return {"replan_stalled": True,
+                "step_count": state.get("step_count", 0) + 1}
+
+    collected = list(state.get("retrieved_chunks") or [])
+    notes = list(state.get("research_notes") or [])
+    executed = {str(s.get("query") or "") for s in (state.get("plan_status") or [])}
+    executed |= set(notes)
+
+    # Pick the next query: original query when we have nothing yet (no-plan
+    # fallback path), otherwise a model-generated follow-up angle.
+    q = query if not collected else None
+    if q is None:
+        chat = _followup_model(state)
+        if chat is None:
+            return {"replan_stalled": True,
+                    "step_count": state.get("step_count", 0) + 1}
+        q = _generate_followup(collected, query, chat)
+    if not q or q in executed:
+        # Nothing new to search -> stop the loop (routing checks this flag).
+        _log.info("research: replan stalled (no new query)")
+        return {"replan_stalled": True,
+                "step_count": state.get("step_count", 0) + 1}
+
+    seen = {_seen_key(c) for c in collected}
+    hits = _search(q, state.get("api_key_override"), state.get("base_url_override"))
+    new_chunks = []
+    for c in hits:
+        if _seen_key(c) in seen:
+            continue
+        seen.add(_seen_key(c))
+        c["matched_query"] = q
+        new_chunks.append(c)
+    collected.extend(new_chunks)
+    notes.append(q)
+
+    _log.info("research: replan q=%r hits=%d total=%d", q[:60], len(new_chunks), len(collected))
+    return {
+        "retrieved_chunks": collected,
+        "research_notes": notes,
+        "research_iterations": int(state.get("research_iterations") or 0) + 1,
+        "replan_stalled": False,
         "step_count": state.get("step_count", 0) + 1,
     }

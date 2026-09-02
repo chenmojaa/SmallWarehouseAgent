@@ -53,6 +53,21 @@ class UserProfile(SQLModel, table=True):
   updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MemoryFact(SQLModel, table=True):
+  """长期记忆事实：从对话中自动抽取的用户偏好/背景/约束，跨会话召回。
+
+  与 UserProfile（手动 JSON 画像）互补：这里是逐条事实 + 来源会话 + 时间，
+  支持按与当前问题的相关性召回（字符重叠启发式，见 recall_facts）。
+  """
+  __tablename__ = "memory_facts"
+  id: Optional[int] = Field(default=None, primary_key=True)
+  content: str                      # 一条完整事实，如「用户偏好简洁的中文回答」
+  norm_key: str = Field(index=True) # 规范化文本 hash，用于去重
+  session_id: Optional[str] = None  # 事实来源会话
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+  updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class User(SQLModel, table=True):
   """Login account: phone is the account identifier, password stored as PBKDF2 hash."""
   __tablename__ = "users"
@@ -437,3 +452,90 @@ def save_profile(user_id: str, facts: dict) -> None:
     else:
       s.add(UserProfile(user_id=user_id, facts_json=payload))
     s.commit()
+
+
+# === Long-term memory facts (自动抽取的跨会话事实) ===
+
+def _norm_fact(text: str) -> str:
+  """规范化事实文本：去空白/标点后取 hash，用于精确去重。"""
+  import hashlib
+  cleaned = re.sub(r"[\s，。、；：？！,.:;?!\"'（）()\[\]【】\-—_]", "", (text or "").lower())
+  return hashlib.md5(cleaned.encode("utf-8")).hexdigest() if cleaned else ""
+
+
+def save_facts(facts: list[str], session_id: str | None = None) -> int:
+  """写入一批抽取事实，norm_key 去重。返回新增条数。"""
+  added = 0
+  with get_session() as s:
+    for f in facts:
+      f = (f or "").strip()
+      if not f or len(f) < 4 or len(f) > 300:
+        continue
+      key = _norm_fact(f)
+      if not key:
+        continue
+      exists = s.exec(select(MemoryFact).where(MemoryFact.norm_key == key)).first()
+      if exists:
+        # 重复出现的事实视为再次确认：刷新时间，提高召回优先级
+        exists.updated_at = datetime.now(timezone.utc)
+        s.add(exists)
+        continue
+      s.add(MemoryFact(content=f, norm_key=key, session_id=session_id))
+      added += 1
+    s.commit()
+  return added
+
+
+def list_facts(limit: int = 200) -> list[dict]:
+  """列出全部事实（管理用），时间倒序。"""
+  with get_session() as s:
+    rows = s.exec(
+      select(MemoryFact).order_by(MemoryFact.updated_at.desc()).limit(limit)
+    ).all()
+  return [{"id": r.id, "content": r.content, "session_id": r.session_id,
+           "created_at": r.created_at.isoformat(), "updated_at": r.updated_at.isoformat()}
+          for r in rows]
+
+
+def delete_fact(fact_id: int) -> bool:
+  with get_session() as s:
+    row = s.get(MemoryFact, fact_id)
+    if not row:
+      return False
+    s.delete(row)
+    s.commit()
+  return True
+
+
+def recall_facts(query: str, limit: int = 8) -> list[str]:
+  """跨会话召回：按与当前问题的字符重叠启发式排序 + 时间倒序。
+
+  事实总量小（个人知识助手场景 < 数百条），全量读入后排序比建向量索引
+  更可靠（不依赖 EMBEDDING_API_KEY，且对 CJK 无分词问题）。重叠>0 的
+  相关事实优先，其余名额留给最近的事实（保证基础背景常驻）。
+  """
+  with get_session() as s:
+    rows = s.exec(
+      select(MemoryFact).order_by(MemoryFact.updated_at.desc()).limit(500)
+    ).all()
+  if not rows:
+    return []
+
+  # 字符 bigram 重叠计分：CJK 无空格分词，bigram 是最稳的相关性近似
+  def _bigrams(t: str) -> set[str]:
+    t = re.sub(r"\s", "", t)
+    return {t[i:i+2] for i in range(len(t) - 1)} if len(t) > 1 else {t}
+
+  qgrams = _bigrams(query or "")
+  scored = []
+  for r in rows:
+    overlap = len(qgrams & _bigrams(r.content)) if qgrams else 0
+    scored.append((overlap, r.updated_at, r.content))
+  scored.sort(key=lambda x: (-x[0], -x[1].timestamp()))
+
+  # 相关事实优先，剩余名额给最近事实（背景兜底）
+  relevant = [c for o, _, c in scored if o > 0]
+  recent = [c for o, _, c in scored if o == 0]
+  half = max(1, limit // 2)
+  out = (relevant[:limit] + recent[:half])[:limit]
+  return out

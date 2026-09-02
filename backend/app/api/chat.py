@@ -45,6 +45,7 @@ class ChatRequest(BaseModel):
   embedding_model: str | None = None
   embedding_base_url: str | None = None
   agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
+  use_planner: bool | None = None     # None=跟随服务端 HD_PLANNER_ENABLED；true/false=本轮强制开/关
 
 
 class PermissionDecision(BaseModel):
@@ -61,6 +62,26 @@ def _extract_query(messages):
 
 def _sse(event: str, payload) -> str:
   return "event: " + event + chr(10) + "data: " + json.dumps(payload, ensure_ascii=False) + chr(10) + chr(10)
+
+
+def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply: str) -> None:
+  """本轮对话结束后后台抽取用户事实（长期记忆）。不抛错、不阻塞 SSE。
+
+  用 to_thread 跑同步 LLM 调用，避免阻塞事件循环；fire-and-forget。
+  """
+  import asyncio
+  from app.agent.memory import extract_facts
+
+  history = [
+    {"role": "user", "content": user_query or ""},
+    {"role": "assistant", "content": (assistant_reply or "")[:1500]},
+  ]
+  try:
+    asyncio.get_running_loop().create_task(
+      asyncio.to_thread(extract_facts, history, session_id)
+    )
+  except RuntimeError:
+    pass  # 无事件循环（理论不可达）：跳过，下一轮再抽
 
 
 def _build_initial_state(body: ChatRequest, query: str, session_id: str,
@@ -85,6 +106,15 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   except Exception:
     pass
 
+  # 长期记忆召回（§6.6）：按与当前问题的相关性召回已抽取的跨会话事实，
+  # 注入 state 供 answer 阶段拼进 system prompt。Best-effort。
+  memory_facts = []
+  try:
+    from app.storage.db import recall_facts
+    memory_facts = recall_facts(query or "", limit=int(settings.memory_max_facts))
+  except Exception as e:
+    _log.debug("memory recall failed (ignored): %s", e)
+
   # History summary (§6.3): only when the window overflows, compress the cut-off
   # older turns so follow-ups still see the gist. Best-effort, never blocks.
   summary = ""
@@ -108,11 +138,17 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "step_count": 0,
     "profile": profile,
     "summary": summary,
+    "memory_facts": memory_facts,
     # Per-turn fields must be reset: with a persistent SQLite checkpointer any
     # field absent from this input would leak from the previous turn's checkpoint
     # (e.g. a stale intent="ingest" re-routing a plain chat turn to the ingest node).
     "intent": "",
     "rewritten_query": "",
+    "plan": [],
+    "plan_summary": "",
+    "plan_cursor": 0,
+    "plan_status": [],
+    "replan_stalled": False,
     "skip_retrieval": False,
     "research_iterations": 0,
     "research_notes": [],
@@ -121,6 +157,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "answer": None,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
+    "use_planner": body.use_planner,
   }
 
 
@@ -196,16 +233,49 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
                                    "intent": intent,
                                    "rewritten_query": delta.get("rewritten_query"),
                                    "ms": round(router_ms, 1)})
+            elif node_name == "planner":
+              plan = delta.get("plan") or []
+              queries = [str(s.get("query") or "") for s in plan if isinstance(s, dict)]
+              yield _sse("stage", {"stage": "agent", "status": "done",
+                                   "agent": "planner",
+                                   "steps": len(plan),
+                                   "plan_summary": delta.get("plan_summary") or ""})
+              # 计划创建：前端渲染计划进度条（summary + 每步一个 chip）
+              if queries:
+                yield _sse("plan", {"phase": "created",
+                                    "summary": delta.get("plan_summary") or "",
+                                    "queries": queries})
+            elif node_name == "execute_plan":
+              # 计划逐步执行：astream 每循环一次产生一个事件 -> 逐步推送进度
+              rag_hits = len(delta.get("retrieved_chunks") or [])
+              plan_status = delta.get("plan_status") or []
+              cursor = int(delta.get("plan_cursor") or 0)
+              total_steps = len(final_state.get("plan") or [])
+              if plan_status:
+                last = plan_status[-1]
+                yield _sse("stage", {"stage": "agent", "status": "done",
+                                     "agent": "research",
+                                     "step": cursor, "total_steps": total_steps,
+                                     "query": last.get("query") or "",
+                                     "hits": rag_hits})
+                yield _sse("plan", {"phase": "step_done", "index": cursor - 1,
+                                    "query": last.get("query") or "",
+                                    "hits": int(last.get("hits") or 0)})
+            elif node_name == "replan":
+              # 动态补缺一轮
+              rag_hits = len(delta.get("retrieved_chunks") or [])
+              notes = delta.get("research_notes") or []
+              if notes and not delta.get("replan_stalled"):
+                yield _sse("stage", {"stage": "agent", "status": "done",
+                                     "agent": "research",
+                                     "step": None, "query": notes[-1],
+                                     "hits": rag_hits})
+                yield _sse("plan", {"phase": "replan", "query": notes[-1],
+                                    "hits": rag_hits})
             elif node_name == "retrieve":
               rag_hits = len(delta.get("retrieved_chunks") or [])
               yield _sse("stage", {"stage": "rag_search", "status": "started"})
               yield _sse("stage", {"stage": "rag_search", "status": "done", "hits": rag_hits})
-            elif node_name == "research":
-              iters = int(delta.get("research_iterations") or 0)
-              rag_hits = len(delta.get("retrieved_chunks") or [])
-              yield _sse("stage", {"stage": "agent", "status": "started", "agent": "research"})
-              yield _sse("stage", {"stage": "agent", "status": "done",
-                                   "agent": "research", "iterations": iters, "hits": rag_hits})
             elif node_name == "ingest":
               yield _sse("stage", {"stage": "agent", "status": "done", "agent": "ingest"})
               yield _sse("ingest", delta.get("ingest_result") or {})
@@ -224,6 +294,16 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       if early_done:
         yield "data: [DONE]" + chr(10) + chr(10)
         return
+
+      # 研究循环结束：发一次汇总（前端把进行中的 chips 收尾）
+      if intent == "research":
+        yield _sse("plan", {"phase": "done",
+                            "iterations": int(final_state.get("research_iterations") or 0),
+                            "hits": len(final_state.get("retrieved_chunks") or [])})
+        yield _sse("stage", {"stage": "agent", "status": "done",
+                             "agent": "research",
+                             "iterations": int(final_state.get("research_iterations") or 0),
+                             "hits": len(final_state.get("retrieved_chunks") or [])})
 
       # Phase 2: LLM token stream from final graph state (chat / research).
       yield _sse("stage", {"stage": "llm_stream", "status": "started"})
@@ -277,6 +357,8 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
                          citations if citations else None)
         except Exception:
           pass
+        # 长期记忆：本轮结束后后台抽取用户事实（不阻塞 SSE 响应）
+        _schedule_fact_extraction(session_id, query, "".join(text_parts))
       return
 
     # ---- Legacy path (HD_USE_GRAPH=false) ----

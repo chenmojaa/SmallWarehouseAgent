@@ -16,11 +16,20 @@ class AgentState(TypedDict, total=False):
   # ---- long-term memory (§6.5) ----
   profile: dict                     # user profile facts, injected by chat.py
   summary: str                      # compressed summary of history outside the window
+  memory_facts: list                # recalled cross-session facts (long-term memory)
 
   # ---- current request ----
   query: str
   intent: str                       # chat | research | ingest | report (router output)
   rewritten_query: str              # router output: original query + 3-turn history resolved
+
+  # ---- task planning (plan-and-execute) ----
+  plan: list                        # planner output: [{"query": <sub-question>}, ...]
+  plan_summary: str                 # one-sentence description of the overall approach
+  plan_cursor: int                  # index of the NEXT plan step to execute
+  plan_status: list                 # per-step execution records: [{query, hits, new_chunks}]
+  replan_stalled: bool              # replan loop could not produce a new query -> stop
+  use_planner: bool | None          # per-request override; None = follow HD_PLANNER_ENABLED
 
   # ---- retrieval results ----
   retrieved_chunks: list

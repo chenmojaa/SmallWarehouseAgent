@@ -60,7 +60,12 @@ def format_context(chunks: Iterable[dict] | None,
   for i, c in enumerate(chunk_list):
     text = (c.get("text") or "")[:MAX_CHUNK_CHARS]
     title = c.get("title") or c.get("note_id", "?")
-    block = "[%d] source: %s\n%s" % (i + 1, title, text)
+    # 任务规划：标注该 chunk 由哪个子查询命中，模型可按子问题组织回答
+    matched = str(c.get("matched_query") or "").strip()
+    if matched:
+      block = "[%d] source: %s (sub-question: %s)\n%s" % (i + 1, title, matched[:80], text)
+    else:
+      block = "[%d] source: %s\n%s" % (i + 1, title, text)
     cost = estimate_tokens(block)
     if used + cost > token_budget and rendered:
       _log.info("context: dropped %d/%d chunks over token budget (%d/%d tokens)",
@@ -147,11 +152,12 @@ def build_messages(instructions: str,
                    history: list[dict],
                    question: str,
                    summary: str = "",
-                   profile: dict | None = None) -> list:
+                   profile: dict | None = None,
+                   memory_facts: list[str] | None = None) -> list:
   """Assemble the final LangChain message list (§7).
 
-  Order is fixed: system (instructions + summary + profile + references)
-  -> trimmed history -> current question. The ``<<CONTEXT>>`` and
+  Order is fixed: system (instructions + summary + memory facts + profile +
+  references) -> trimmed history -> current question. The ``<<CONTEXT>>`` and
   ``<<QUESTION>>`` placeholders in ``instructions`` are filled here.
 
   When there are no reference chunks, citation-related rules are stripped
@@ -172,6 +178,11 @@ def build_messages(instructions: str,
   parts = [sys_text]
   if summary:
     parts.append("[history summary] " + summary[:400])
+  # 长期记忆：召回的跨会话事实，模型应自然利用（不要求主动提及）
+  facts = [str(f).strip() for f in (memory_facts or []) if str(f).strip()]
+  if facts:
+    parts.append("[long-term memory about this user]\n" +
+                 "\n".join("- " + f[:200] for f in facts))
   line = _profile_line(profile or {})
   if line:
     parts.append(line)
