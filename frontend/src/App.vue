@@ -11,6 +11,8 @@ import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
+import { open as openPalette } from '@/composables/useCommandPalette'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
 
 const route = useRoute()
@@ -34,6 +36,22 @@ const naiveOverrides = computed(() => ({
     successColorPressed: '#2563eb',
   },
 }))
+
+
+
+function onGlobalKey(e: KeyboardEvent) {
+  const mod = e.metaKey || e.ctrlKey
+  if (mod && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    openPalette()
+    return
+  }
+  if (e.key === 'Escape' && streamingHere.value) {
+    chat.abortStream?.()
+  }
+}
+window.addEventListener('keydown', onGlobalKey)
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
 
 const settings = useSettingsStore()
 const sessions = useSessionsStore()
@@ -90,6 +108,7 @@ function toggleSider() {
 
 // 设置弹窗
 const settingsOpen = ref(false)
+const paletteOpen = ref(false)
 </script>
 
 <template>
@@ -145,6 +164,7 @@ const settingsOpen = ref(false)
           </n-layout-content>
         </n-layout>
         <SettingsDrawer v-model:show="settingsOpen" />
+      <CommandPalette v-model:show="paletteOpen" />
       </n-layout>
     </n-message-provider>
   </n-config-provider>
