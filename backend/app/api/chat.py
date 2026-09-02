@@ -46,6 +46,7 @@ class ChatRequest(BaseModel):
   embedding_base_url: str | None = None
   agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
   use_planner: bool | None = None     # None=跟随服务端 HD_PLANNER_ENABLED；true/false=本轮强制开/关
+  subagent: str | None = None         # Optional sub-agent profile (explore|plan|general) to dispatch in parallel with the main answer.
 
 
 class PermissionDecision(BaseModel):
@@ -168,6 +169,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
     "use_planner": body.use_planner,
+    "subagent_mode": body.subagent,
   }
 
 
@@ -370,6 +372,32 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       yield _sse("stage", {"stage": "llm_stream", "status": "done"})
       if citations:
         yield _sse("citations", citations)
+      # ---- Optional sub-agent dispatch (Codex CLI / Claude Code parity) ----
+      # If the request set subagent=<mode>, fire a parallel read-only or
+      # general-purpose sub-agent run *after* the main answer stream completes
+      # and surface its reasoning + tool calls as ``subagent`` SSE events.
+      # Disabled unless the user explicitly opts in; defaults to None so
+      # the existing behaviour is preserved.
+      sub_mode = final_state.get("subagent_mode") or body.subagent
+      if sub_mode:
+        try:
+          from app.agent.subagents import run_subagent_stream, SUBAGENT_MODES
+          mode = sub_mode if sub_mode in SUBAGENT_MODES else "general"
+          sub_history = list(final_state.get("messages") or [])[-8:]
+          async for ev in run_subagent_stream(
+            mode=mode, query=query,
+            api_key=api_key, base_url=base_url,
+            history=sub_history,
+            extra_context={
+              "summary": final_state.get("summary") or "",
+              "memory_facts": final_state.get("memory_facts") or [],
+              "project_rules": final_state.get("project_rules") or "",
+              "agent_permission": (body.agent_permission or "default"),
+            },
+          ):
+            yield _sse("subagent", ev)
+        except Exception as e:
+          yield _sse("subagent", {"phase": "error", "detail": str(e)[:300]})
       yield "data: [DONE]" + chr(10) + chr(10)
 
       if not errored and text_parts:

@@ -239,6 +239,21 @@ def build_mcp_tools() -> list[StructuredTool]:
         return "[mcp denied by hook] %s" % _reason
     except Exception as _he:
       _log.debug("PreToolUse hook failed (ignored): %s", _he)
+    # --- Per-tool permissions (Codex CLI / Claude Code parity) ---
+    # The agent/tool_permissions layer ships default allow/ask/deny rules
+    # for each tool identifier. User overrides land in the JSON file under
+    # backend/data/permissions.json. Layered after PreToolUse so hooks can
+    # still veto first; ``deny`` short-circuits the call without spending
+    # a permission-broker round trip.
+    try:
+      from app.agent import tool_permissions as _perms
+      full_name = "mcp:" + server_id + ":" + tool_name
+      _decision, _ = _perms.is_tool_allowed(full_name)
+      if _decision == "deny":
+        _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="denied", latency_ms=0, error="permission denied by user rule")
+        return "[mcp denied by permissions] " + full_name + " is set to deny."
+    except Exception as _pe:
+      _log.debug("per-tool permission lookup failed (ignored): %s", _pe)
     _t0 = _time.time()
     sess = _session_for(match)
     out = sess.call(tool_name, args_obj)
