@@ -99,7 +99,7 @@ async function doChangePwd() {
   <div class="login-page">
     <div class="login-panel">
       <div class="brand">
-        <div class="brand-logo">smallhouse</div>
+        <img src="/logo.png" alt="Small Warehouse Agent" class="brand-logo-img" />
         <div class="brand-title">个人知识小助手</div>
         <div class="brand-sub">多模型 · RAG · 飞书同步</div>
       </div>
@@ -194,12 +194,13 @@ async function doChangePwd() {
 .brand {
   max-width: 320px;
 }
-.brand-logo {
-  font-size: 44px;
-  font-weight: 800;
-  letter-spacing: 2px;
+.brand-logo-img {
+  height: 88px;
+  width: auto;
   margin-bottom: 12px;
-  color: #3b82f6;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 4px 16px rgba(59, 130, 246, 0.35));
 }
 .brand-title {
   font-size: 26px;
