@@ -484,4 +484,12 @@ const maskPhone = (p: string) => p ? p.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$
   .drawer-nav { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border-soft); }
   .nav-item { white-space: nowrap; }
 }
+
+.setting-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-soft, rgba(255,255,255,0.08)); }
+.setting-row:last-child { border-bottom: 0; }
+.setting-row label { min-width: 100px; font-size: 13px; opacity: 0.85; }
+.accent-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.accent-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.15s, border-color 0.15s; }
+.accent-swatch:hover { transform: scale(1.15); }
+.accent-swatch.active { border-color: var(--text-primary, #fff); box-shadow: 0 0 0 2px var(--bg-app, #1f1f23) inset; }
 </style>

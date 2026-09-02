@@ -13,6 +13,7 @@ import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { open as openPalette } from '@/composables/useCommandPalette'
+import { sidebarDrawerOpen, toggleSidebarDrawer, closeSidebarDrawer } from '@/composables/useMobileDrawer'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
 
 const route = useRoute()
@@ -155,9 +156,16 @@ const paletteOpen = ref(false)
           </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">
-          <n-layout-sider v-if="!siderCollapsed" bordered :width="260" :native-scrollbar="false" content-style="padding: 0;">
+          <n-layout-sider v-if="!siderCollapsed" bordered :width="260" :native-scrollbar="false" content-style="padding: 0;" class="desktop-sider">
             <ChatHistory />
           </n-layout-sider>
+          <transition name="drawer-fade">
+            <div v-if="sidebarDrawerOpen" class="mobile-drawer-mask" @click.self="closeSidebarDrawer">
+              <aside class="mobile-drawer" @click.stop>
+                <ChatHistory />
+              </aside>
+            </div>
+          </transition>
           <n-layout-content content-style="padding: 0; height: 100%;">
             <router-view />
             <StreamingIndicator />
@@ -218,4 +226,30 @@ const paletteOpen = ref(false)
   user-select: none;
   -webkit-user-drag: none;
 }
+
+/* ===== Mobile drawer for sidebar ===== */
+@media (max-width: 768px) {
+  .desktop-sider { display: none !important; }
+}
+@media (min-width: 769px) {
+  .mobile-drawer-mask { display: none !important; }
+}
+.mobile-drawer-mask {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+  display: flex;
+}
+.mobile-drawer {
+  width: 280px;
+  max-width: 80vw;
+  height: 100%;
+  background: var(--bg-app, #1f1f23);
+  box-shadow: 8px 0 24px rgba(0,0,0,0.3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.drawer-fade-enter-active, .drawer-fade-leave-active { transition: opacity 0.15s; }
+.drawer-fade-enter-from, .drawer-fade-leave-to { opacity: 0; }
 </style>

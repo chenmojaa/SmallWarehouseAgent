@@ -471,4 +471,12 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
   .quick-input-row { grid-template-columns: 1fr; }
   .preset-grid { grid-template-columns: 1fr; }
 }
+
+.mcp-title { font-size: 22px; font-weight: 700; margin: 0 0 6px; background: linear-gradient(135deg, var(--accent, #3b82f6), #ec4899); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.mcp-sub { font-size: 13px; opacity: 0.65; margin: 0; max-width: 640px; }
+.mcp-quick { display: flex; gap: 8px; align-items: center; }
+.quick-input { background: var(--bg-soft, rgba(255,255,255,0.04)); border: 1px solid var(--border-soft); color: var(--text-primary); padding: 8px 12px; border-radius: 8px; min-width: 280px; font-size: 13px; }
+.quick-btn { background: var(--accent, #3b82f6); color: #fff; border: 0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.quick-btn:hover { filter: brightness(1.1); }
+.hero { display: none !important; }
 </style>
