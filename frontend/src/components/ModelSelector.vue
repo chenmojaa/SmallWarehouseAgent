@@ -211,8 +211,13 @@ async function saveEntry() {
   flex-shrink: 0;
 }
 .reasoning-select {
-  width: 60px;
+  width: 88px;
   flex-shrink: 0;
+}
+/* keep the rendered content from being clipped by the n-base ellipsis */
+.reasoning-select :deep(.n-base-selection-input__content) {
+  font-size: 13px;
+  line-height: 1.2;
 }
 .add-form {
   display: flex;
