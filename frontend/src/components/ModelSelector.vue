@@ -207,17 +207,25 @@ async function saveEntry() {
   border: none;
 }
 .model-select {
-  width: 130px;
-  flex-shrink: 0;
+  /* grow to fit the longest model name, never clip */
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 280px;
 }
 .reasoning-select {
+  flex: 0 0 auto;
   width: 88px;
-  flex-shrink: 0;
 }
-/* keep the rendered content from being clipped by the n-base ellipsis */
-.reasoning-select :deep(.n-base-selection-input__content) {
+/* Centre the rendered label inside n-select (default is left-aligned). */
+.model-selector-group :deep(.n-base-selection-input) {
+  justify-content: center;
+  text-align: center;
+}
+.model-selector-group :deep(.n-base-selection-input__content) {
   font-size: 13px;
   line-height: 1.2;
+  text-align: center;
+  width: 100%;
 }
 .add-form {
   display: flex;
