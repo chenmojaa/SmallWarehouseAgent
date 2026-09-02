@@ -174,3 +174,33 @@ def invoke_with_retry(chat, payload, *, max_retries: int | None = None, on_retry
       time.sleep(delay)
   # Unreachable, but keep type-checkers happy.
   raise last_exc  # pragma: no cover
+
+async def astream_with_retry(chat, messages, *, max_retries=None, on_retry=None):
+  """Wrap chat.astream(messages) with retry on connection/startup errors.
+
+  Stream retries are tricky: once a chunk is delivered we can't rewind. So we
+  retry only BEFORE the first successful chunk arrives, treating any error as
+  'the stream never started'. After that, errors propagate immediately.
+  """
+  import asyncio as _aio
+  retries = max_retries if max_retries is not None else max(0, int(getattr(settings, "llm_max_retries", 3)))
+  attempt = 0
+  while True:
+    try:
+      async for chunk in chat.astream(messages):
+        attempt += 1
+        yield chunk
+      return
+    except Exception as e:
+      if attempt > 0 or not _is_retryable(e) or retries <= 0:
+        raise
+      delay = _backoff_delay(1)
+      if on_retry is not None:
+        try: on_retry(1, e, delay)
+        except Exception: pass
+      logging.getLogger(__name__).warning(
+        "llm astream retry %d/%d after %.2fs: %s",
+        1, retries, delay, type(e).__name__,
+      )
+      await _aio.sleep(delay)
+      retries -= 1

@@ -49,6 +49,12 @@ def hybrid_search(
   model: str | None = None,
   min_score: float = MIN_FINAL_SCORE,
   min_dim_score: float = MIN_DIM_SCORE,
+  source_type: str | None = None,
+  tag: str | None = None,
+  date_from: str | None = None,
+  date_to: str | None = None,
+  rerank: bool = False,
+  expand: bool = False,
 ) -> list[dict]:
   """Combine vector + keyword search, dedupe, return top_k.
 
@@ -142,3 +148,62 @@ def hybrid_search(
     if len(results) >= top_k:
       break
   return results
+
+
+def filter_by_meta(results, source_type=None, tag=None, date_from=None, date_to=None):
+  """Post-filter merged results by note metadata. No-op if no filters given."""
+  if not any([source_type, tag, date_from, date_to]):
+    return results
+  from datetime import datetime
+  from app.storage.db import get_note_meta
+  out = []
+  df = None
+  dt = None
+  try:
+    if date_from: df = datetime.fromisoformat(date_from)
+    if date_to:   dt = datetime.fromisoformat(date_to)
+  except Exception:
+    pass
+  for r in results:
+    meta = get_note_meta(r["note_id"]) or {}
+    if source_type and meta.get("source_type") != source_type:
+      continue
+    if tag:
+      tags = (meta.get("tags") or "").split(",")
+      if tag not in [t.strip() for t in tags if t.strip()]:
+        continue
+    if df or dt:
+      ts = meta.get("created_at")
+      if ts:
+        try:
+          d = datetime.fromisoformat(str(ts).replace("Z", ""))
+          if df and d < df: continue
+          if dt and d > dt: continue
+        except Exception:
+          pass
+    out.append(r)
+  return out
+
+
+def hybrid_search_with_expansion(query, top_k=5, **kwargs):
+  """hybrid_search + optional query expansion + optional rerank."""
+  from app.agent.retrieval_quality import expand_query, rerank
+  if kwargs.get("expand"):
+    variants = expand_query(query)
+    merged_acc = []
+    seen = set()
+    for v in variants:
+      sub = hybrid_search(v, top_k=top_k, **{k: vv for k, vv in kwargs.items() if k not in ("expand", "rerank")})
+      for r in sub:
+        k = "%s#%s" % (r["note_id"], r["chunk_index"])
+        if k not in seen:
+          seen.add(k)
+          r["_expansion_variant"] = v
+          merged_acc.append(r)
+    results = merged_acc[:top_k * 2]
+  else:
+    results = hybrid_search(query, top_k=top_k, **{k: vv for k, vv in kwargs.items() if k not in ("expand", "rerank")})
+
+  if kwargs.get("rerank") and len(results) > 1:
+    results = rerank(query, results)
+  return results[:top_k]
