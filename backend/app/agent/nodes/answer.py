@@ -138,15 +138,25 @@ def answer_node(state: AgentState) -> dict:
   }
 
 
-async def answer_node_stream(state: AgentState):
+async def answer_node_stream(state: AgentState, instructions_override=None):
   """Stream the answer as one LLM call, then derive citations from [n] markers.
 
   Tool-calling path: when tools are available we bind them and run a tool-call
   loop. ``tool_call`` and ``tool_result`` SSE events surface every invocation
   (the frontend can ignore them silently). The first non-tool-call response is
   emitted as a single ``text_delta`` event followed by ``done``.
+
+  ``instructions_override`` lets sub-agents (app/agent/subagents.py)
+  substitute the default system prompt with their profile-specific text.
+  Defaults to None which preserves the existing behaviour.
   """
   chat, msgs, chunks, tools, _inventory = _build_messages(state)
+  if instructions_override:
+    from langchain_core.messages import SystemMessage as _SM
+    if msgs and isinstance(msgs[0], _SM):
+      msgs = [_SM(content=instructions_override + "\n\n" + (msgs[0].content or ""))] + list(msgs[1:])
+    else:
+      msgs = [_SM(content=instructions_override)] + list(msgs)
   full_text = ""
 
   # 权限模式：default=本地能力调用需用户逐次批准；full=不询问。
