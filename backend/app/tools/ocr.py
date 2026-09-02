@@ -50,3 +50,29 @@ def ocr_image(path: str, lang: str = "chi_sim+eng") -> dict:
   # 支持中文简体 + 英文，如未安装中文包会在运行时抛错
   text = pytesseract.image_to_string(img, lang=lang)
   return {"text": text.strip(), "engine": "tesseract", "lang": lang}
+
+def ocr_status() -> dict:
+  tess = _find_tesseract()
+  langs = []
+  chi_sim_ok = False
+  if tess:
+    from pathlib import Path
+    td = Path(tess).parent / "tessdata"
+    if td.exists():
+      for p in td.glob("*.traineddata"):
+        langs.append(p.stem)
+        if p.stem == "chi_sim":
+          chi_sim_ok = True
+  return {
+    "tesseract_path": tess,
+    "available": tess is not None,
+    "languages": sorted(langs),
+    "chi_sim_installed": chi_sim_ok,
+    "install_hint": (
+      "1) Download Tesseract Windows installer from "
+      "https://github.com/UB-Mannheim/tesseract/wiki ; "
+      "2) During install, check 'Additional language data -> Chinese (Simplified)'; "
+      "3) Add the Tesseract install directory to PATH (or set TESSERACT_CMD env var); "
+      "4) Restart the backend."
+    ),
+  }

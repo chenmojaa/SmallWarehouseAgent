@@ -167,4 +167,10 @@ def route_by_intent(state: AgentState) -> str:
         return "chat_no_rag"
     if intent in ("research", "ingest", "report"):
         return intent
+    # Heuristic: if planner produced >=2 sub-queries for a chat-classified
+    # question (e.g. "compare A vs B and tabulate it"), escalate to research
+    # so the plan actually runs without forcing the LLM to label it research.
+    plan = state.get("plan") or []
+    if len(plan) >= 2:
+        return "research"
     return "chat"

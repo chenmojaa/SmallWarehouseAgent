@@ -190,6 +190,17 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
   if query and body.messages[-1].role == "user":
     append_message(session_id, "user", query)
 
+  # MCP context: tag every subsequent log row with this session_id, then
+  # reset the session pool so stale sessions from previous turns do not
+  # leak across users.
+  try:
+    from app.agent.tools.mcp_tools import set_session_id, set_permission_mode, reset_mcp_sessions
+    set_session_id(session_id)
+    set_permission_mode(getattr(body, "agent_permission", "default") or "default")
+    reset_mcp_sessions()
+  except Exception:
+    pass
+
   initial_state = _build_initial_state(body, query, session_id, api_key, base_url,
                                        emb_key, emb_base, emb_model)
   t_req = time.perf_counter()

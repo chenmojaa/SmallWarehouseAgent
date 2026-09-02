@@ -335,3 +335,32 @@ def delete_server(server_id: str):
       raise HTTPException(status_code=404, detail='MCP 不存在')
     _write_servers(remaining)
   return {'ok': True}
+
+@router.get('/calls')
+def list_calls(limit: int = 100, server_id: str | None = None, session_id: str | None = None, status: str | None = None):
+  from app.storage.db import list_mcp_calls
+  rows = list_mcp_calls(limit=limit, server_id=server_id, session_id=session_id, status=status)
+  return {'calls': rows, 'count': len(rows)}
+
+@router.delete('/calls')
+def clear_calls(server_id: str | None = None):
+  from app.storage.db import clear_mcp_calls
+  n = clear_mcp_calls(server_id=server_id)
+  return {'ok': True, 'cleared': n}
+
+@router.get('/calls/stats')
+def call_stats(server_id: str | None = None):
+  from app.storage.db import list_mcp_calls
+  rows = list_mcp_calls(limit=500, server_id=server_id)
+  total = len(rows)
+  by_status = {}
+  by_server = {}
+  latencies = []
+  for r in rows:
+    by_status[r['status']] = by_status.get(r['status'], 0) + 1
+    by_server[r['server_id']] = by_server.get(r['server_id'], 0) + 1
+    if r['latency_ms'] > 0: latencies.append(r['latency_ms'])
+  avg = int(sum(latencies) / len(latencies)) if latencies else 0
+  p95 = sorted(latencies)[int(len(latencies)*0.95)] if latencies else 0
+  return {'total': total, 'by_status': by_status, 'by_server': by_server, 'avg_latency_ms': avg, 'p95_latency_ms': p95}
+
