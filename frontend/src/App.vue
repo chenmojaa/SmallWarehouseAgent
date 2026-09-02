@@ -106,7 +106,10 @@ function toggleTheme() {
 
 const siderCollapsed = ref(false)
 function toggleSider() {
-  siderCollapsed.value = !siderCollapsed.value// Settings drawer state lives in the Pinia store (defined above)
+  siderCollapsed.value = !siderCollapsed.value
+}
+
+// Settings drawer state lives in the Pinia store (defined above)
 // so any component can open it via settings.openSettings().
 const paletteOpen = ref(false)
 </script>
