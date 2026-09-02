@@ -115,6 +115,15 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   except Exception as e:
     _log.debug("memory recall failed (ignored): %s", e)
 
+  # AGENTS.md / project-rules (Codex CLI / Claude Code convention):
+  # standing instructions are loaded into the answer system prompt.
+  project_rules = ""
+  try:
+    from app.agent.agents_md import project_rules as _pr
+    project_rules = _pr()
+  except Exception as e:
+    _log.debug("agents_md load failed (ignored): %s", e)
+
   # History summary (§6.3): only when the window overflows, compress the cut-off
   # older turns so follow-ups still see the gist. Best-effort, never blocks.
   summary = ""
@@ -139,6 +148,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "profile": profile,
     "summary": summary,
     "memory_facts": memory_facts,
+    "project_rules": project_rules,
     # Per-turn fields must be reset: with a persistent SQLite checkpointer any
     # field absent from this input would leak from the previous turn's checkpoint
     # (e.g. a stale intent="ingest" re-routing a plain chat turn to the ingest node).

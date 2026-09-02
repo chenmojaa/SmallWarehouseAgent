@@ -82,13 +82,10 @@ def _build_messages(state: AgentState):
     summary=state.get("summary") or "",
     profile=state.get("profile") or None,
     memory_facts=state.get("memory_facts") or None,
+    project_rules=state.get("project_rules") or "",
+    inventory=inventory,
   )
-  if inventory:
-    from langchain_core.messages import SystemMessage
-    if msgs and isinstance(msgs[0], SystemMessage):
-      msgs[0] = SystemMessage(content=(msgs[0].content or "") + inventory)
-    else:
-      msgs = [SystemMessage(content=inventory)] + msgs
+  # (inventory now flows through build_messages directly)
   return chat, msgs, chunks, tools, inventory
 
 

@@ -1,4 +1,4 @@
-"""Chat session REST API."""
+﻿"""Chat session REST API."""
 from __future__ import annotations
 
 from typing import Optional
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.storage.db import (
   list_sessions, get_session_with_messages, create_session,
   delete_session, rename_session,
+  fork_session as _fork_session,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -19,6 +20,10 @@ class CreateSessionRequest(BaseModel):
 
 class RenameRequest(BaseModel):
   title: str = Field(..., min_length=1, max_length=100)
+
+
+class ForkRequest(BaseModel):
+  title: Optional[str] = None
 
 
 @router.get("/sessions")
@@ -54,3 +59,17 @@ async def api_rename_session(session_id: str, body: RenameRequest):
   if not ok:
     raise HTTPException(404, "Session not found")
   return {"renamed": session_id, "title": body.title}
+
+
+@router.post("/sessions/{session_id}/fork")
+async def api_fork_session(session_id: str, body: ForkRequest | None = None):
+  """Clone an existing session + all of its messages into a new session.
+
+  Returns the new session descriptor. The caller should switch the active
+  session to the new id to start the branch.
+  """
+  payload = body.title if body else None
+  result = _fork_session(session_id, payload)
+  if not result:
+    raise HTTPException(404, "Session not found")
+  return result

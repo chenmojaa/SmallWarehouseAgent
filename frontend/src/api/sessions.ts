@@ -1,4 +1,4 @@
-import { get, postJson, deleteReq, postJsonPatch } from './client'
+﻿import { get, postJson, deleteReq, postJsonPatch } from './client'
 import type { Citation } from './chat'
 
 export interface Session {
@@ -26,6 +26,11 @@ export interface SessionDetail {
   messages: ChatMessageRecord[]
 }
 
+export interface ForkedSession extends Session {
+  parent_id?: string
+  source_message_count?: number
+}
+
 export async function listSessions(): Promise<Session[]> {
   const r = await get<{ items: Session[] }>("/sessions")
   return r.items
@@ -45,4 +50,8 @@ export async function deleteSession(id: string): Promise<{ deleted: string }> {
 
 export async function renameSession(id: string, title: string) {
   return postJsonPatch("/sessions/" + id, { title })
+}
+
+export async function forkSession(id: string, title?: string): Promise<ForkedSession> {
+  return postJson<ForkedSession>("/sessions/" + id + "/fork", { title })
 }

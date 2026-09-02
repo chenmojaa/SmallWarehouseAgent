@@ -388,6 +388,46 @@ def rename_session(session_id: str, title: str) -> bool:
   return True
 
 
+def fork_session(session_id: str, new_title: str | None = None) -> dict | None:
+  """Clone an existing session + all of its messages into a brand new session.
+
+  Returns the new session dict {id, title, created_at, updated_at, parent_id,
+  source_message_count} or None if the source session does not exist. Used by
+  /api/sessions/{id}/fork (Codex CLI / Claude Code "fork session" parity)."""
+  from uuid import uuid4
+  with get_session() as s:
+    src = s.get(ChatSession, session_id)
+    if not src:
+      return None
+    src_msgs = s.exec(
+      select(ChatMessage)
+      .where(ChatMessage.session_id == session_id)
+      .order_by(ChatMessage.id)
+    ).all()
+    new_id = "s_" + uuid4().hex[:12]
+    title = (new_title or ("Fork of " + (src.title or "Untitled"))).strip()[:100] or "Fork"
+    new_sess = ChatSession(id=new_id, title=title)
+    s.add(new_sess)
+    s.flush()
+    for m in src_msgs:
+      s.add(ChatMessage(
+        session_id=new_id,
+        role=m.role,
+        content=m.content,
+        citations_json=m.citations_json,
+      ))
+    s.commit()
+    s.refresh(new_sess)
+    return {
+      "id": new_id,
+      "title": new_sess.title,
+      "created_at": new_sess.created_at.isoformat() if new_sess.created_at else None,
+      "updated_at": new_sess.updated_at.isoformat() if new_sess.updated_at else None,
+      "parent_id": session_id,
+      "source_message_count": len(src_msgs),
+    }
+
+
 def touch_session(session_id: str) -> None:
   with get_session() as s:
     sess = s.get(ChatSession, session_id)

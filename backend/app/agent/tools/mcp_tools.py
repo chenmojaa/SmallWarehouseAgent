@@ -226,10 +226,34 @@ def build_mcp_tools() -> list[StructuredTool]:
       _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=arguments, status="error", latency_ms=0, error="args not dict")
       return "[mcp error] arguments must be a JSON object, got %s" % type(args_obj).__name__
     import time as _time
+    # --- Hooks: PreToolUse (may veto) ---
+    try:
+      from app.agent import hooks as _hooks
+      _pre = _hooks.fire(_hooks.PRE_TOOL_USE, {
+        "tool": "mcp:%s:%s" % (server_id, tool_name),
+        "arguments": args_obj,
+      })
+      _blocked, _reason = _hooks.is_blocked(_pre)
+      if _blocked:
+        _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="denied", latency_ms=0, error=_reason[:200])
+        return "[mcp denied by hook] %s" % _reason
+    except Exception as _he:
+      _log.debug("PreToolUse hook failed (ignored): %s", _he)
     _t0 = _time.time()
     sess = _session_for(match)
     out = sess.call(tool_name, args_obj)
     _latency_ms = int((_time.time() - _t0) * 1000)
+    # --- Hooks: PostToolUse ---
+    try:
+      from app.agent import hooks as _hooks2
+      _hooks2.fire(_hooks2.POST_TOOL_USE, {
+        "tool": "mcp:%s:%s" % (server_id, tool_name),
+        "arguments": args_obj,
+        "result": out if isinstance(out, str) else str(out),
+        "latency_ms": _latency_ms,
+      })
+    except Exception as _he2:
+      _log.debug("PostToolUse hook failed (ignored): %s", _he2)
     if isinstance(out, str) and out.startswith("[mcp error]"):
       _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="error", latency_ms=_latency_ms, error=out[:200])
     elif isinstance(out, str) and "timeout" in out.lower():

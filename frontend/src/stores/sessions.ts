@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia'
-import { listSessions, createSession, deleteSession, getSessionDetail, type Session, type SessionDetail } from '@/api/sessions'
+﻿import { defineStore } from 'pinia'
+import { listSessions, createSession, deleteSession, getSessionDetail, forkSession, type Session, type SessionDetail } from '@/api/sessions'
 
 interface State {
   items: Session[]
@@ -55,6 +55,22 @@ export const useSessionsStore = defineStore("sessions", {
       } catch (e) {
         this.error = (e as Error).message
       }
+    },
+    async fork(id: string, title?: string) {
+      // Clone the session + all messages into a new session, then prepend it to
+      // the list and set it as the active detail. Used by the "fork" button on
+      // each session row in ChatHistory.vue.
+      const forked = await forkSession(id, title)
+      this.items.unshift({
+        id: forked.id,
+        title: forked.title,
+        created_at: forked.created_at,
+        updated_at: forked.updated_at,
+        message_count: forked.message_count ?? 0,
+        preview: forked.preview ?? "",
+      })
+      try { await this.loadDetail(forked.id) } catch { /* ignore */ }
+      return forked
     },
     async loadDetail(id: string) {
       this.loading = true

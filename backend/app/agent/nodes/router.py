@@ -162,6 +162,11 @@ def router_node(state: AgentState) -> dict:
 def route_by_intent(state: AgentState) -> str:
     """Conditional edge dispatcher. Used by LangGraph after the router."""
     intent = (state.get("intent") or "chat").lower()
+    # Plan Mode (Codex CLI / Claude Code parity): if the user toggled it on,
+    # escalate chat-classified queries so the planner still gets a chance to
+    # decompose a multi-step question.
+    if state.get("use_planner") and intent == "chat":
+        intent = "research"
     if state.get("skip_retrieval"):
         return "chat_no_rag"
     if intent in ("research", "ingest", "report"):
