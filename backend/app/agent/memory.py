@@ -55,10 +55,12 @@ _JSON_ARR_RE = re.compile(r"\[[\s\S]*\]")
 _THINK_RE = re.compile(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", re.IGNORECASE)
 
 
-def extract_facts(history: list[dict], session_id: str | None = None) -> list[str]:
+def extract_facts(history: list[dict], session_id: str | None = None,
+                  api_key: str | None = None) -> list[str]:
   """从对话历史抽取用户事实，写入 DB 并返回新增列表。NEVER raises。
 
   只看最近几轮（信息密度最高），跳过太短的寒暄轮。
+  ``api_key``：凭证可能只随请求传入（.env 不一定配 LLM_API_KEY），必须带上。
   """
   try:
     from app.config import settings
@@ -82,6 +84,7 @@ def extract_facts(history: list[dict], session_id: str | None = None) -> list[st
     chat = _build_model(
       provider=None,
       model=settings.router_model or None,
+      api_key=api_key,
       base_url=settings.router_base_url or None,
     )
     prompt = (EXTRACT_PROMPT
@@ -113,11 +116,14 @@ def extract_facts(history: list[dict], session_id: str | None = None) -> list[st
 
 def summarize_overflow(history: list[dict],
                        max_messages: int = 12,
-                       token_budget: int = HISTORY_TOKEN_BUDGET) -> str:
+                       token_budget: int = HISTORY_TOKEN_BUDGET,
+                       api_key: str | None = None) -> str:
   """Return a short summary of the history that falls outside the window.
 
   Returns "" when nothing overflows or when summarization fails. The summary is
   capped at ~150 CJK chars per the plan (§6.3).
+  ``api_key``：凭证可能只随请求传入（.env 不一定配 LLM_API_KEY），必须带上，
+  否则 ChatOpenAI 因 Missing credentials 静默失败（2026-08-28 起日志里一直是）。
   """
   _recent, overflow = trim_history(history, max_messages=max_messages,
                                    token_budget=token_budget)
@@ -135,6 +141,7 @@ def summarize_overflow(history: list[dict],
     chat = _build_model(
       provider=None,
       model=settings.router_model or None,
+      api_key=api_key,
       base_url=settings.router_base_url or None,
     )
     prompt = (

@@ -64,10 +64,12 @@ def _sse(event: str, payload) -> str:
   return "event: " + event + chr(10) + "data: " + json.dumps(payload, ensure_ascii=False) + chr(10) + chr(10)
 
 
-def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply: str) -> None:
+def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply: str,
+                              api_key: str | None = None) -> None:
   """本轮对话结束后后台抽取用户事实（长期记忆）。不抛错、不阻塞 SSE。
 
   用 to_thread 跑同步 LLM 调用，避免阻塞事件循环；fire-and-forget。
+  api_key 必须从当前请求透传：.env 不配 LLM_API_KEY 时凭证只存在于请求里。
   """
   import asyncio
   from app.agent.memory import extract_facts
@@ -78,7 +80,7 @@ def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply:
   ]
   try:
     asyncio.get_running_loop().create_task(
-      asyncio.to_thread(extract_facts, history, session_id)
+      asyncio.to_thread(extract_facts, history, session_id, api_key)
     )
   except RuntimeError:
     pass  # 无事件循环（理论不可达）：跳过，下一轮再抽
@@ -120,7 +122,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   summary = ""
   if len(history) > 12:
     try:
-      summary = summarize_overflow(history)
+      summary = summarize_overflow(history, api_key=api_key)
     except Exception:
       summary = ""
 
@@ -358,7 +360,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
         except Exception:
           pass
         # 长期记忆：本轮结束后后台抽取用户事实（不阻塞 SSE 响应）
-        _schedule_fact_extraction(session_id, query, "".join(text_parts))
+        _schedule_fact_extraction(session_id, query, "".join(text_parts), api_key)
       return
 
     # ---- Legacy path (HD_USE_GRAPH=false) ----
