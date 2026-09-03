@@ -637,10 +637,10 @@ function onKey(e: KeyboardEvent) {
 }
 .input-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   margin-top: 6px;
-  gap: 12px;
+  gap: 8px;
   padding: 0 4px;
 }
 .model-picker-wrap :deep(.n-select .n-base-selection),
