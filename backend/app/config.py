@@ -40,6 +40,7 @@ class Settings(BaseSettings):
   tools_max_steps: int = 6                          # HD_TOOLS_MAX_STEPS; cap on tool-call iterations
   mcp_call_timeout_sec: float = 30.0                # HD_MCP_CALL_TIMEOUT; per-tool call budget
   mcp_init_timeout_sec: float = 10.0                # HD_MCP_INIT_TIMEOUT; per-server startup budget
+  llm_max_retries: int = 3                          # HD_LLM_MAX_RETRIES; transient failures retry budget (0 = no retry)
   # ---- Feishu (Lark) sync ----
   feishu_enabled: bool = False
   feishu_app_id: str = ""

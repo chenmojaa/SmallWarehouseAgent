@@ -46,6 +46,7 @@ class ChatRequest(BaseModel):
   embedding_base_url: str | None = None
   agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
   use_planner: bool | None = None     # None=跟随服务端 HD_PLANNER_ENABLED；true/false=本轮强制开/关
+  subagent: str | None = None         # Optional sub-agent profile (explore|plan|general) to dispatch in parallel with the main answer.
 
 
 class PermissionDecision(BaseModel):
@@ -117,6 +118,15 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   except Exception as e:
     _log.debug("memory recall failed (ignored): %s", e)
 
+  # AGENTS.md / project-rules (Codex CLI / Claude Code convention):
+  # standing instructions are loaded into the answer system prompt.
+  project_rules = ""
+  try:
+    from app.agent.agents_md import project_rules as _pr
+    project_rules = _pr()
+  except Exception as e:
+    _log.debug("agents_md load failed (ignored): %s", e)
+
   # History summary (§6.3): only when the window overflows, compress the cut-off
   # older turns so follow-ups still see the gist. Best-effort, never blocks.
   summary = ""
@@ -141,6 +151,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "profile": profile,
     "summary": summary,
     "memory_facts": memory_facts,
+    "project_rules": project_rules,
     # Per-turn fields must be reset: with a persistent SQLite checkpointer any
     # field absent from this input would leak from the previous turn's checkpoint
     # (e.g. a stale intent="ingest" re-routing a plain chat turn to the ingest node).
@@ -160,6 +171,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
     "use_planner": body.use_planner,
+    "subagent_mode": body.subagent,
   }
 
 
@@ -191,6 +203,17 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
 
   if query and body.messages[-1].role == "user":
     append_message(session_id, "user", query)
+
+  # MCP context: tag every subsequent log row with this session_id, then
+  # reset the session pool so stale sessions from previous turns do not
+  # leak across users.
+  try:
+    from app.agent.tools.mcp_tools import set_session_id, set_permission_mode, reset_mcp_sessions
+    set_session_id(session_id)
+    set_permission_mode(getattr(body, "agent_permission", "default") or "default")
+    reset_mcp_sessions()
+  except Exception:
+    pass
 
   initial_state = _build_initial_state(body, query, session_id, api_key, base_url,
                                        emb_key, emb_base, emb_model)
@@ -351,6 +374,32 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
       yield _sse("stage", {"stage": "llm_stream", "status": "done"})
       if citations:
         yield _sse("citations", citations)
+      # ---- Optional sub-agent dispatch (Codex CLI / Claude Code parity) ----
+      # If the request set subagent=<mode>, fire a parallel read-only or
+      # general-purpose sub-agent run *after* the main answer stream completes
+      # and surface its reasoning + tool calls as ``subagent`` SSE events.
+      # Disabled unless the user explicitly opts in; defaults to None so
+      # the existing behaviour is preserved.
+      sub_mode = final_state.get("subagent_mode") or body.subagent
+      if sub_mode:
+        try:
+          from app.agent.subagents import run_subagent_stream, SUBAGENT_MODES
+          mode = sub_mode if sub_mode in SUBAGENT_MODES else "general"
+          sub_history = list(final_state.get("messages") or [])[-8:]
+          async for ev in run_subagent_stream(
+            mode=mode, query=query,
+            api_key=api_key, base_url=base_url,
+            history=sub_history,
+            extra_context={
+              "summary": final_state.get("summary") or "",
+              "memory_facts": final_state.get("memory_facts") or [],
+              "project_rules": final_state.get("project_rules") or "",
+              "agent_permission": (body.agent_permission or "default"),
+            },
+          ):
+            yield _sse("subagent", ev)
+        except Exception as e:
+          yield _sse("subagent", {"phase": "error", "detail": str(e)[:300]})
       yield "data: [DONE]" + chr(10) + chr(10)
 
       if not errored and text_parts:

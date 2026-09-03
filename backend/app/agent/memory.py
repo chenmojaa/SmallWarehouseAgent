@@ -80,7 +80,7 @@ def extract_facts(history: list[dict], session_id: str | None = None,
     existing = [f["content"] for f in list_facts(limit=50)]
     existing_str = "\n".join("- " + e for e in existing) or "(none)"
 
-    from app.llm.factory import _build_model
+    from app.llm.factory import _build_model, invoke_with_retry
     chat = _build_model(
       provider=None,
       model=settings.router_model or None,
@@ -90,7 +90,7 @@ def extract_facts(history: list[dict], session_id: str | None = None,
     prompt = (EXTRACT_PROMPT
               .replace("<<EXISTING>>", existing_str)
               .replace("<<CONVERSATION>>", transcript))
-    resp = chat.invoke(prompt)
+    resp = invoke_with_retry(chat, prompt)
     content = getattr(resp, "content", "") or ""
     if isinstance(content, list):
       content = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
@@ -137,7 +137,7 @@ def summarize_overflow(history: list[dict],
 
   try:
     from app.config import settings
-    from app.llm.factory import _build_model
+    from app.llm.factory import _build_model, invoke_with_retry
     chat = _build_model(
       provider=None,
       model=settings.router_model or None,
@@ -148,7 +148,7 @@ def summarize_overflow(history: list[dict],
       "把以下对话压缩成一段不超过 150 字的中文摘要，保留关键结论与用户偏好，"
       "不要输出其他内容：\n" + transcript
     )
-    resp = chat.invoke(prompt)
+    resp = invoke_with_retry(chat, prompt)
     text = getattr(resp, "content", "") or ""
     if isinstance(text, list):
       text = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in text)

@@ -44,26 +44,25 @@ def _is_fast_chat(query: str) -> bool:
     """Return True if the query is a simple greeting / small talk that can skip the router."""
     return bool(_FAST_CHAT_PATTERNS.match(query.strip())) if query else False
 
-ROUTER_PROMPT = """You are HD knowledge base task router. Read the conversation history and the latest message, and output exactly one JSON object with NO other text:
+ROUTER_PROMPT = """你是 HD 知识库的任务路由器。请阅读对话历史和最新消息,只输出一个 JSON 对象,不要任何其他文字:
 
 {"intent": "<chat|research|ingest|report>", "rewritten_query": "<string>"}
 
-Intent rules:
-- chat: small talk, simple factual questions, no synthesis required
-- research: needs cross-document synthesis, comparing multiple options, deep-diving a subject
-- ingest: message contains URL / file description / "save this" / "remember this" / "add to my KB"
-- report: requests daily/weekly/summary reports, period rollups
+Intent 分类规则:
+- chat: 闲聊、简单事实问答、不需要综合多个来源
+- research: 需要跨文档综合、对比多个方案、深入挖掘某个主题
+- ingest: 消息包含 URL / 文件描述 / "保存这个" / "记住这个" / "加到我的知识库"
+- report: 请求日报/周报/总结/某时间段汇总
 
-rewritten_query rules:
-- combine the latest user message with up to 3 prior turns, expanding pronouns
-  ("it" / "this" / "that one above") into a complete standalone sentence
-- output ONLY the rewritten question itself, do NOT answer it
-- keep the rewritten query in the SAME language as the user's latest message
+rewritten_query 规则:
+- 把最新消息与最近 3 轮对话合并,把代词("它"/"这个"/"上面那个")展开成完整独立的句子
+- 只输出重写后的问题本身,不要回答它
+- 语言保持与用户最新消息相同
 
-Example:
-History: [user] What is the origin of the Bull Demon King? [assistant] The Bull Demon King is...
-Input: "What about his son?"
-Output: {"intent": "research", "rewritten_query": "What is the background of the Bull Demon King's son (Red Boy)?"}
+示例:
+历史: [user] 牛魔王的来历? [assistant] 牛魔王是...
+输入: "他儿子呢?"
+输出: {"intent": "research", "rewritten_query": "牛魔王的儿子(红孩儿)的背景是什么?"}
 """
 
 
@@ -163,8 +162,19 @@ def router_node(state: AgentState) -> dict:
 def route_by_intent(state: AgentState) -> str:
     """Conditional edge dispatcher. Used by LangGraph after the router."""
     intent = (state.get("intent") or "chat").lower()
+    # Plan Mode (Codex CLI / Claude Code parity): if the user toggled it on,
+    # escalate chat-classified queries so the planner still gets a chance to
+    # decompose a multi-step question.
+    if state.get("use_planner") and intent == "chat":
+        intent = "research"
     if state.get("skip_retrieval"):
         return "chat_no_rag"
     if intent in ("research", "ingest", "report"):
         return intent
+    # Heuristic: if planner produced >=2 sub-queries for a chat-classified
+    # question (e.g. "compare A vs B and tabulate it"), escalate to research
+    # so the plan actually runs without forcing the LLM to label it research.
+    plan = state.get("plan") or []
+    if len(plan) >= 2:
+        return "research"
     return "chat"

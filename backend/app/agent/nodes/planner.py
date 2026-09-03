@@ -20,21 +20,21 @@ from app.llm.factory import _build_model
 
 _log = logging.getLogger(__name__)
 
-PLANNER_PROMPT = """You are a research task planner. Read the question and output exactly one JSON object with NO other text:
+PLANNER_PROMPT = """你是研究任务的规划器。阅读问题,只输出一个 JSON 对象,不要任何其他文字:
 
-{"plan_summary": "<one short sentence describing the overall approach>", "steps": [{"query": "<sub-question search query>"}, ...]}
+{"plan_summary": "<一句话描述整体思路>", "steps": [{"query": "<子问题检索语句>"}, ...]}
 
-Planning rules:
-- Decompose the question into 1-4 concrete sub-questions that together cover the full scope.
-- Each step's "query" is a standalone search query for a knowledge base, in the SAME language as the question.
-- Sub-queries must be mutually complementary (different angles), NOT paraphrases of each other.
-- The FIRST step should be the most direct formulation of the original question.
-- If the question is simple and one search suffices, output exactly one step.
-- Do NOT answer the question, only plan the searches.
+规划规则:
+- 把问题拆成 1-4 个具体子问题,一起覆盖完整范围
+- 每个 step 的 query 是知识库的独立检索句,语言与原问题一致
+- 子问题必须互补(不同角度),不能是同义改写
+- 第一个 step 用最直接的原问题形式
+- 如果问题简单、一次检索就够,只输出一个 step
+- 不要回答问题,只规划检索
 
-Example:
-Input: "对比一下我笔记里 A 方案和 B 方案的优缺点"
-Output: {"plan_summary": "分别检索两个方案再对比", "steps": [{"query": "A 方案的优点和缺点"}, {"query": "B 方案的优点和缺点"}, {"query": "A 方案与 B 方案的对比结论"}]}
+示例:
+输入: "对比一下我笔记里 A 方案和 B 方案的优缺点"
+输出: {"plan_summary": "分别检索两个方案再对比", "steps": [{"query": "A 方案的优点和缺点"}, {"query": "B 方案的优点和缺点"}, {"query": "A 方案与 B 方案的对比总结"}]}
 """
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}")

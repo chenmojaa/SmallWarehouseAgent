@@ -89,6 +89,10 @@ export async function postJsonPatch<T>(path: string, body: unknown): Promise<T> 
   return res.json() as Promise<T>
 }
 
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  return postJsonPatch<T>(path, body)
+}
+
 export async function deleteReq(path: string): Promise<unknown> {
   const res = await fetch(BASE + path, { method: "DELETE", headers: { ...authHeaders() } })
   throwIfUnauthorized(res.status)

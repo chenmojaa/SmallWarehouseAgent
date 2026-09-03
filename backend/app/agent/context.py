@@ -153,7 +153,9 @@ def build_messages(instructions: str,
                    question: str,
                    summary: str = "",
                    profile: dict | None = None,
-                   memory_facts: list[str] | None = None) -> list:
+                   memory_facts: list[str] | None = None,
+                   project_rules: str = "",
+                   inventory: str = "") -> list:
   """Assemble the final LangChain message list (§7).
 
   Order is fixed: system (instructions + summary + memory facts + profile +
@@ -186,6 +188,14 @@ def build_messages(instructions: str,
   line = _profile_line(profile or {})
   if line:
     parts.append(line)
+
+  # AGENTS.md / project standing instructions (Codex CLI / Claude Code).
+  rules = (project_rules or "").strip()
+  if rules:
+    parts.append("[project rules - AGENTS.md]\n" + rules[:6000])
+  inv = (inventory or "").strip()
+  if inv:
+    parts.append(inv)
 
   msgs = [SystemMessage(content="\n\n".join(parts))]
 

@@ -3,9 +3,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useMessage } from 'naive-ui'
 import SkillsPanel from '@/components/SkillsPanel.vue'
 import McpPanel from '@/components/McpPanel.vue'
+import McpCallHistory from '@/components/McpCallHistory.vue'
 
 const message = useMessage()
-const tab = ref<'skills' | 'mcp'>('skills')
+const tab = ref<'skills' | 'mcp' | 'history'>('skills')
 
 const mcpPanelRef = ref<InstanceType<typeof McpPanel> | null>(null)
 const skillsPanelRef = ref<InstanceType<typeof SkillsPanel> | null>(null)
@@ -29,7 +30,7 @@ onMounted(() => {
   }
 })
 
-function switchTab(name: 'skills' | 'mcp') {
+function switchTab(name: 'skills' | 'mcp' | 'history') {
   tab.value = name
 }
 </script>

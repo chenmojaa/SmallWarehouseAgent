@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { markAuthed, markLoggedOut } from '@/router'
+import * as authApi from '@/api/auth'
 
 const TOKEN_KEY = 'hd_auth_token'
 const PHONE_KEY = 'hd_auth_phone'
@@ -24,7 +25,12 @@ export const useAuthStore = defineStore('auth', () => {
     markAuthed()
   }
 
-  function logout() {
+  /**
+   * Logout: tell the server to revoke the token (so it can't be reused
+   * on another device), then drop local state.
+   */
+  async function logout() {
+    try { await authApi.logout() } catch {}
     token.value = ''
     phone.value = ''
     try {

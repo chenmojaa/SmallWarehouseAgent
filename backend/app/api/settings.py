@@ -92,3 +92,9 @@ async def custom_models(body: CustomModelsRequest):
   elif "siliconflow" in b: provider = "siliconflow"
   elif "ollama" in b or "11434" in b: provider = "ollama"
   return {"provider": provider, "base_url": base, "models": ids}
+
+@router.get("/ocr-status")
+def ocr_status_endpoint():
+  """OCR availability for the settings UI (helps users install chi_sim)."""
+  from app.tools.ocr import ocr_status
+  return ocr_status()

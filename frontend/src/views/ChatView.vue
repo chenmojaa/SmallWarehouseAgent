@@ -715,4 +715,27 @@ function onKey(e: KeyboardEvent) {
   color: #fca5a5;
   font-size: 12px;
 }
+
+.drop-overlay {
+  position: fixed; inset: 0;
+  background: rgba(59, 130, 246, 0.18);
+  backdrop-filter: blur(4px);
+  z-index: 5000;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.drop-card {
+  background: var(--bg-app, #1f1f23);
+  border: 2px dashed #3b82f6;
+  border-radius: 14px;
+  padding: 36px 56px;
+  text-align: center;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+}
+.drop-icon { font-size: 48px; margin-bottom: 8px; }
+.drop-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.drop-sub { font-size: 13px; color: var(--text-muted, #888); }
+.drop-fade-enter-active, .drop-fade-leave-active { transition: opacity 0.12s; }
+.drop-fade-enter-from, .drop-fade-leave-to { opacity: 0; }
+
 </style>

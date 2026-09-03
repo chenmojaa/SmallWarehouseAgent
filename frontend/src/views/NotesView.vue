@@ -1,4 +1,10 @@
 <script setup lang="ts">
+const filterSource = ref('')
+const filterTag = ref('')
+const dateFrom = ref('')
+const dateTo = ref('')
+function applyFilter() { /* hook into existing search */ }
+
 import { ref, computed, onMounted } from 'vue'
 import { useNotesStore } from '@/stores/notes'
 import {
@@ -911,4 +917,8 @@ function openExternal(url?: string | null) {
   .note-item { align-items: stretch; flex-direction: column; gap: 8px; }
   .note-actions { justify-content: flex-start; }
 }
+
+.search-filters { display: flex; gap: 6px; align-items: center; padding: 8px 0; flex-wrap: wrap; }
+.filter-chip { background: var(--bg-soft); border: 1px solid var(--border-soft); color: var(--text-primary); padding: 4px 10px; border-radius: 6px; font-size: 12px; }
+.filter-apply { padding: 4px 12px; border: 0; background: var(--accent, #3b82f6); color: #fff; border-radius: 6px; cursor: pointer; font-size: 12px; }
 </style>

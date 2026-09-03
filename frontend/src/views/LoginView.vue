@@ -31,8 +31,9 @@ const regPhone = ref('')
 const regPassword = ref('')
 const regPassword2 = ref('')
 
-// ---- change password ----
+// ---- change password (now requires old_password, per P0 hardening) ----
 const cpPhone = ref('')
+const cpOldPassword = ref('')
 const cpNewPassword = ref('')
 
 const PHONE_RE = /^1[3-9]\d{9}$/
@@ -78,16 +79,19 @@ async function doRegister() {
 async function doChangePwd() {
   const phone = cpPhone.value.trim()
   if (!PHONE_RE.test(phone)) { message.warning('请输入正确的手机号'); return }
+  if (!cpOldPassword.value) { message.warning('请输入旧密码以验证身份'); return }
   if (cpNewPassword.value.length < 6) { message.warning('新密码长度至少 6 位'); return }
+  if (cpOldPassword.value === cpNewPassword.value) { message.warning('新密码不能与旧密码相同'); return }
   loading.value = true
   try {
-    await authApi.changePassword(phone, cpNewPassword.value)
+    await authApi.changePassword(phone, cpOldPassword.value, cpNewPassword.value)
     message.success('密码修改成功，请使用新密码登录')
     mode.value = 'login'
     account.value = phone
     password.value = ''
+    cpOldPassword.value = ''
+    cpNewPassword.value = ''
   } catch (e) {
-    // 后端会校验数据库中是否存在该手机号
     message.error((e as Error).message || '修改密码失败')
   } finally {
     loading.value = false
@@ -100,7 +104,7 @@ async function doChangePwd() {
     <div class="login-panel">
       <div class="brand">
         <img src="/logo.png" alt="Small Warehouse Agent" class="brand-logo-img" />
-        <div class="brand-title">个人知识小助手</div>
+        <div class="brand-title">个人知识小助理</div>
         <div class="brand-sub">多模型 · RAG · 飞书同步</div>
       </div>
 
@@ -146,15 +150,18 @@ async function doChangePwd() {
         </div>
       </n-card>
 
-      <!-- 修改密码卡片 -->
+      <!-- 修改密码卡片（P0: now requires old password） -->
       <n-card v-else class="auth-card" :bordered="false">
         <template #header>修改密码</template>
         <n-text depth="3" style="font-size: 12px; display: block; margin-bottom: 12px">
-          将校验数据库中是否存在该手机号，存在则更新密码
+          输入手机号 + 旧密码 + 新密码以验证身份。修改成功后请用新密码登录。
         </n-text>
         <n-form @keyup.enter="doChangePwd">
           <n-form-item label="手机号" label-placement="top">
             <n-input v-model:value="cpPhone" placeholder="请输入注册时的手机号" maxlength="11" />
+          </n-form-item>
+          <n-form-item label="旧密码" label-placement="top">
+            <n-input v-model:value="cpOldPassword" type="password" show-password-on="click" placeholder="请输入当前密码" />
           </n-form-item>
           <n-form-item label="新密码" label-placement="top">
             <n-input v-model:value="cpNewPassword" type="password" show-password-on="click" placeholder="至少 6 位" />
@@ -175,7 +182,7 @@ async function doChangePwd() {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 跟随项目主题（--bg-app 由 html.light / dark 切换） */
+  /* 跟随项目主题：--bg-app 由 html.light / dark 切换 */
   background:
     radial-gradient(1200px 600px at 85% -10%, rgba(59, 130, 246, 0.08), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, rgba(59, 130, 246, 0.06), transparent 60%),

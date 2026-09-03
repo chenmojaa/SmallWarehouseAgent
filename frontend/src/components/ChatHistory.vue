@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionsStore } from '@/stores/sessions'
@@ -47,6 +47,16 @@ async function removeSession(id: string, e: Event) {
   if (activeId.value === id) {
     chat.clear()
     router.push({ name: 'chat' })
+  }
+}
+
+async function forkSession(id: string, e: Event) {
+  e.stopPropagation()
+  try {
+    const forked = await sessions.fork(id)
+    router.push({ path: '/chat/' + forked.id })
+  } catch (err) {
+    console.warn('fork failed:', err)
   }
 }
 
@@ -100,6 +110,7 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
         >
           <div class="session-row">
             <span class="session-title">{{ s.title }}</span>
+            <n-button text size="small" @click.stop="forkSession(s.id, $event)" class="fork-btn" title="分叉：复制对话与全部消息到新会话">⤴</n-button>
             <n-popconfirm @positive-click="removeSession(s.id, $event)">
               <template #trigger>
                 <n-button text size="small" type="error" @click.stop class="delete-btn">✕</n-button>
@@ -239,6 +250,14 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
   font-size: 11px;
   flex-shrink: 0;
 }
+.fork-btn {
+  font-size: 14px;
+  opacity: 0.6;
+  margin-right: 4px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+.fork-btn:hover { opacity: 1; }
 .session-preview {
   font-size: 11px;
   opacity: 0.6;

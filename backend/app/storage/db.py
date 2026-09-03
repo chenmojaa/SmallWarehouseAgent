@@ -388,6 +388,46 @@ def rename_session(session_id: str, title: str) -> bool:
   return True
 
 
+def fork_session(session_id: str, new_title: str | None = None) -> dict | None:
+  """Clone an existing session + all of its messages into a brand new session.
+
+  Returns the new session dict {id, title, created_at, updated_at, parent_id,
+  source_message_count} or None if the source session does not exist. Used by
+  /api/sessions/{id}/fork (Codex CLI / Claude Code "fork session" parity)."""
+  from uuid import uuid4
+  with get_session() as s:
+    src = s.get(ChatSession, session_id)
+    if not src:
+      return None
+    src_msgs = s.exec(
+      select(ChatMessage)
+      .where(ChatMessage.session_id == session_id)
+      .order_by(ChatMessage.id)
+    ).all()
+    new_id = "s_" + uuid4().hex[:12]
+    title = (new_title or ("Fork of " + (src.title or "Untitled"))).strip()[:100] or "Fork"
+    new_sess = ChatSession(id=new_id, title=title)
+    s.add(new_sess)
+    s.flush()
+    for m in src_msgs:
+      s.add(ChatMessage(
+        session_id=new_id,
+        role=m.role,
+        content=m.content,
+        citations_json=m.citations_json,
+      ))
+    s.commit()
+    s.refresh(new_sess)
+    return {
+      "id": new_id,
+      "title": new_sess.title,
+      "created_at": new_sess.created_at.isoformat() if new_sess.created_at else None,
+      "updated_at": new_sess.updated_at.isoformat() if new_sess.updated_at else None,
+      "parent_id": session_id,
+      "source_message_count": len(src_msgs),
+    }
+
+
 def touch_session(session_id: str) -> None:
   with get_session() as s:
     sess = s.get(ChatSession, session_id)
@@ -539,3 +579,84 @@ def recall_facts(query: str, limit: int = 8) -> list[str]:
   half = max(1, limit // 2)
   out = (relevant[:limit] + recent[:half])[:limit]
   return out
+# === MCP call history (cross-session visibility) ===
+class MCPCallLog(SQLModel, table=True):
+  __tablename__ = "mcp_call_log"
+  id: Optional[int] = Field(default=None, primary_key=True)
+  session_id: Optional[str] = Field(default=None, index=True)
+  server_id: str = Field(index=True)
+  tool_name: str
+  arguments_json: Optional[str] = None
+  status: str  # ok | error | timeout | denied
+  latency_ms: int = 0
+  result_preview: Optional[str] = None  # first 200 chars
+  error_message: Optional[str] = None
+  created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+
+_MCP_LOG_MAX_ROWS = 5000
+
+
+def log_mcp_call(session_id, server_id, tool_name, arguments, status, latency_ms=0, result_preview=None, error_message=None):
+  try:
+    import json as _json
+    args_str = _json.dumps(arguments, ensure_ascii=False)[:4000] if arguments is not None else None
+    row = MCPCallLog(
+      session_id=session_id, server_id=server_id, tool_name=tool_name,
+      arguments_json=args_str, status=status, latency_ms=int(latency_ms),
+      result_preview=(result_preview or "")[:300] or None,
+      error_message=(error_message or "")[:500] or None,
+    )
+    with Session(get_engine()) as s:
+      s.add(row); s.commit(); s.refresh(row)
+    if row.id and row.id % 100 == 0:
+      with get_engine().begin() as c:
+        c.execute(text(
+          "DELETE FROM mcp_call_log WHERE id NOT IN ("
+          "  SELECT id FROM mcp_call_log ORDER BY id DESC LIMIT :cap)"
+        ), {"cap": _MCP_LOG_MAX_ROWS})
+    return int(row.id or 0)
+  except Exception as e:
+    import logging as _log
+    _log.getLogger(__name__).warning("mcp_call_log insert failed: %s", e)
+    return 0
+
+
+def list_mcp_calls(limit=100, server_id=None, session_id=None, status=None):
+  limit = min(max(limit, 1), 500)
+  stmt = select(MCPCallLog).order_by(MCPCallLog.id.desc()).limit(limit)
+  if server_id: stmt = stmt.where(MCPCallLog.server_id == server_id)
+  if session_id: stmt = stmt.where(MCPCallLog.session_id == session_id)
+  if status: stmt = stmt.where(MCPCallLog.status == status)
+  with Session(get_engine()) as s:
+    rows = s.exec(stmt).all()
+  out = []
+  for r in rows:
+    out.append({
+      "id": r.id,
+      "session_id": r.session_id,
+      "server_id": r.server_id,
+      "tool_name": r.tool_name,
+      "arguments": _safe_json(r.arguments_json),
+      "status": r.status,
+      "latency_ms": r.latency_ms,
+      "result_preview": r.result_preview,
+      "error_message": r.error_message,
+      "created_at": r.created_at.isoformat() if r.created_at else None,
+    })
+  return out
+
+
+def clear_mcp_calls(server_id=None):
+  with get_engine().begin() as c:
+    if server_id:
+      r = c.execute(text("DELETE FROM mcp_call_log WHERE server_id = :s"), {"s": server_id})
+    else:
+      r = c.execute(text("DELETE FROM mcp_call_log"))
+  return r.rowcount or 0
+
+
+def _safe_json(s):
+  if not s: return None
+  import json as _json
+  try: return _json.loads(s)
+  except Exception: return None

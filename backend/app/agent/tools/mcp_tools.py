@@ -60,6 +60,23 @@ def set_permission_mode(mode: str) -> None:
 _sessions: dict[str, MCPSession] = {}
 
 
+_current_session_id: str | None = None
+
+
+def set_session_id(sid: str | None) -> None:
+  """Tag subsequent log_mcp_call rows with this session id (called per request)."""
+  global _current_session_id
+  _current_session_id = sid
+
+
+def _log_mcp_call(*, server_id, tool_name, arguments, status, latency_ms, result_preview=None, error=None):
+  try:
+    from app.storage.db import log_mcp_call
+    log_mcp_call(_current_session_id, server_id, tool_name, arguments, status, latency_ms, result_preview, error)
+  except Exception:
+    pass
+
+
 def reset_mcp_sessions() -> None:
   """Close all pooled sessions (called at the start of each request)."""
   for sess in _sessions.values():
@@ -203,11 +220,62 @@ def build_mcp_tools() -> list[StructuredTool]:
     try:
       args_obj = json.loads(arguments) if arguments else {}
     except ValueError as e:
+      _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=arguments, status="error", latency_ms=0, error="bad json: %s" % e)
       return "[mcp error] arguments is not valid JSON: %s" % e
     if not isinstance(args_obj, dict):
+      _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=arguments, status="error", latency_ms=0, error="args not dict")
       return "[mcp error] arguments must be a JSON object, got %s" % type(args_obj).__name__
+    import time as _time
+    # --- Hooks: PreToolUse (may veto) ---
+    try:
+      from app.agent import hooks as _hooks
+      _pre = _hooks.fire(_hooks.PRE_TOOL_USE, {
+        "tool": "mcp:%s:%s" % (server_id, tool_name),
+        "arguments": args_obj,
+      })
+      _blocked, _reason = _hooks.is_blocked(_pre)
+      if _blocked:
+        _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="denied", latency_ms=0, error=_reason[:200])
+        return "[mcp denied by hook] %s" % _reason
+    except Exception as _he:
+      _log.debug("PreToolUse hook failed (ignored): %s", _he)
+    # --- Per-tool permissions (Codex CLI / Claude Code parity) ---
+    # The agent/tool_permissions layer ships default allow/ask/deny rules
+    # for each tool identifier. User overrides land in the JSON file under
+    # backend/data/permissions.json. Layered after PreToolUse so hooks can
+    # still veto first; ``deny`` short-circuits the call without spending
+    # a permission-broker round trip.
+    try:
+      from app.agent import tool_permissions as _perms
+      full_name = "mcp:" + server_id + ":" + tool_name
+      _decision, _ = _perms.is_tool_allowed(full_name)
+      if _decision == "deny":
+        _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="denied", latency_ms=0, error="permission denied by user rule")
+        return "[mcp denied by permissions] " + full_name + " is set to deny."
+    except Exception as _pe:
+      _log.debug("per-tool permission lookup failed (ignored): %s", _pe)
+    _t0 = _time.time()
     sess = _session_for(match)
-    return sess.call(tool_name, args_obj)
+    out = sess.call(tool_name, args_obj)
+    _latency_ms = int((_time.time() - _t0) * 1000)
+    # --- Hooks: PostToolUse ---
+    try:
+      from app.agent import hooks as _hooks2
+      _hooks2.fire(_hooks2.POST_TOOL_USE, {
+        "tool": "mcp:%s:%s" % (server_id, tool_name),
+        "arguments": args_obj,
+        "result": out if isinstance(out, str) else str(out),
+        "latency_ms": _latency_ms,
+      })
+    except Exception as _he2:
+      _log.debug("PostToolUse hook failed (ignored): %s", _he2)
+    if isinstance(out, str) and out.startswith("[mcp error]"):
+      _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="error", latency_ms=_latency_ms, error=out[:200])
+    elif isinstance(out, str) and "timeout" in out.lower():
+      _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="timeout", latency_ms=_latency_ms, error=out[:200])
+    else:
+      _log_mcp_call(server_id=server_id, tool_name=tool_name, arguments=args_obj, status="ok", latency_ms=_latency_ms, result_preview=out)
+    return out
 
   def _discover(server_id: str) -> str:
     match = next((it for it in _read_servers()
