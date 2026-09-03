@@ -1,5 +1,6 @@
 <script setup lang='ts'>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { t } from '@/i18n'
 import { useRouter } from 'vue-router'
 import { useMessage, NAlert, NButton, NEmpty, NInput, NModal, NPopconfirm, NSpin, NSwitch, NTag } from 'naive-ui'
 import {
@@ -168,21 +169,21 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
       <div class='quick-bar'>
         <div class='quick-stats'>
           <button class='qstat' @click='pickTab("presets")'>
-            <strong>{{ presets.length }}</strong><span>预设</span>
+            <strong>{{ presets.length }}</strong><span>{{ t('mcp.tab.presets', '预设', '预设') }}</span>
           </button>
           <button class='qstat' :class='{ on: enabledCount > 0 }' @click='pickTab("servers")'>
-            <strong>{{ enabledCount }}</strong><span>已启用</span>
+            <strong>{{ enabledCount }}</strong><span>{{ t('mcp.preset.enabled', '已启用', '已启用') }}</span>
           </button>
           <button class='qstat' @click='pickTab("servers")'>
-            <strong>{{ servers.length }}</strong><span>总服务</span>
+            <strong>{{ servers.length }}</strong><span>{{ t('ui.misc.026', '总服务', '总服务') }}</span>
           </button>
         </div>
         <div class='quick-input-row'>
           <n-input v-model:value='quickPrompt' placeholder='试试问：“查询仓库本周增加的 star” — 需先启用 MCP' size='small' round @keyup.enter='quickStart'>
             <template #prefix><span class='quick-emoji'>✨</span></template>
           </n-input>
-          <n-button type='primary' size='small' round @click='quickStart'>发起试试</n-button>
-          <n-button size='small' round quaternary @click='openCreate'><span style='font-weight:600'>+</span>&nbsp;添加 MCP</n-button>
+          <n-button type='primary' size='small' round @click='quickStart'>{{ t('ui.misc.016', '发起试试', '发起试试') }}</n-button>
+          <n-button size='small' round quaternary @click='openCreate'><span style='font-weight:600'>+</span>{{ t('ui.skills.001', '&nbsp;添加 MCP', '&nbsp;添加 MCP') }}</n-button>
         </div>
         <div class='quick-chips'>
           <button v-for='(p, i) in suggestedPrompts' :key='i' class='chip' @click='quickPrompt = p'>{{ p }}</button>
@@ -196,16 +197,16 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
 
       <!-- 子 tab -->
       <div class='sub-tabs'>
-        <button class='sub-tab' :class='{ active: tab === "presets" }' @click='pickTab("presets")'>预设库</button>
-        <button class='sub-tab' :class='{ active: tab === "servers" }' @click='pickTab("servers")'>我的服务</button>
+        <button class='sub-tab' :class='{ active: tab === "presets" }' @click='pickTab("presets")'>{{ t('ui.misc.056', '预设库', '预设库') }}</button>
+        <button class='sub-tab' :class='{ active: tab === "servers" }' @click='pickTab("servers")'>{{ t('ui.misc.029', '我的服务', '我的服务') }}</button>
       </div>
 
       <!-- 预设库 -->
       <div v-if='tab === "presets"' class='pane'>
         <div class='section-heading'>
           <div>
-            <h2>推荐预设</h2>
-            <p>一键加入。加入后会被模型自动发现，随时可调用。</p>
+            <h2>{{ t('ui.misc.032', '推荐预设', '推荐预设') }}</h2>
+            <p>{{ t('ui.models.002', '一键加入。加入后会被模型自动发现，随时可调用。', '一键加入。加入后会被模型自动发现，随时可调用。') }}</p>
           </div>
           <span class='section-meta'>{{ presets.length }} 项</span>
         </div>
@@ -216,7 +217,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
           <article v-for='preset in presets' :key='preset.id' class='preset-card' :class='{ installed: installedIds.has(preset.id) }' @click='installPreset(preset)'>
             <div class='preset-top'>
               <div class='preset-emoji' :data-cat='preset.category || "agent"'>{{ preset.emoji || '✦' }}</div>
-              <n-tag v-if='installedIds.has(preset.id)' size='tiny' type='success' round class='installed-tag'>已添加</n-tag>
+              <n-tag v-if='installedIds.has(preset.id)' size='tiny' type='success' round class='installed-tag'>{{ t('ui.misc.021', '已添加', '已添加') }}</n-tag>
               <n-tag v-else-if='preset.category' size='tiny' round class='cat-tag'>{{ preset.category }}</n-tag>
             </div>
             <h3>{{ preset.name_zh || preset.name }}<span v-if='preset.name_zh' class='dot'>·</span><span v-if='preset.name_zh' class='en'>{{ preset.name }}</span></h3>
@@ -237,16 +238,16 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
       <div v-else class='pane'>
         <div class='section-heading'>
           <div>
-            <h2>已配置的 MCP</h2>
-            <p>点击「测试」可立即校验连通性，验证后会被模型自动调用。</p>
+            <h2>{{ t('ui.skills.004', '已配置的 MCP', '已配置的 MCP') }}</h2>
+            <p>{{ t('ui.models.004', '点击「测试」可立即校验连通性，验证后会被模型自动调用。', '点击「测试」可立即校验连通性，验证后会被模型自动调用。') }}</p>
           </div>
           <span class='section-meta'>{{ servers.length }} 个已配置</span>
         </div>
         <div v-if='!servers.length' class='empty-block large'>
           <div class='empty-icon'>✦</div>
-          <h3>还没有 MCP 服务</h3>
-          <p>从预设库一键安装，或者手动添加。</p>
-          <n-button type='primary' round @click='openCreate'>手动添加</n-button>
+          <h3>{{ t('ui.skills.013', '还没有 MCP 服务', '还没有 MCP 服务') }}</h3>
+          <p>{{ t('ui.misc.008', '从预设库一键安装，或者手动添加。', '从预设库一键安装，或者手动添加。') }}</p>
+          <n-button type='primary' round @click='openCreate'>{{ t('ui.misc.030', '手动添加', '手动添加') }}</n-button>
         </div>
         <div v-else class='server-list'>
           <article v-for='server in servers' :key='server.id' class='server-card' :class='{ off: !server.enabled }'>
@@ -265,11 +266,11 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
             </div>
             <div class='server-actions'>
               <n-switch :value='server.enabled' size='small' @update:value='(v) => toggleServer(server, v)' @click.stop />
-              <n-button size='small' quaternary :loading='testingId === server.id' @click.stop='testServer(server)'>测试</n-button>
-              <n-button size='small' quaternary @click.stop='openEdit(server)'>编辑</n-button>
+              <n-button size='small' quaternary :loading='testingId === server.id' @click.stop='testServer(server)'>{{ t('ui.misc.045', '测试', '测试') }}</n-button>
+              <n-button size='small' quaternary @click.stop='openEdit(server)'>{{ t('ui.misc.050', '编辑', '编辑') }}</n-button>
               <n-popconfirm @positive-click='removeServer(server)'>
                 <template #trigger>
-                  <n-button size='small' quaternary type='error' @click.stop>删除</n-button>
+                  <n-button size='small' quaternary type='error' @click.stop>{{ t('chat.msg.delete', '删除', '删除') }}</n-button>
                 </template>
                 确定删除「{{ server.name }}」？
               </n-popconfirm>
@@ -285,15 +286,15 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
         <section class='editor-section'>
           <div class='section-header'>
             <span class='section-icon'>📋</span>
-            <h4>基本信息</h4>
+            <h4>{{ t('ui.misc.019', '基本信息', '基本信息') }}</h4>
           </div>
           <div class='field-group'>
             <div class='field'>
-              <label class='field-label'>服务名称</label>
+              <label class='field-label'>{{ t('ui.misc.036', '服务名称', '服务名称') }}</label>
               <n-input v-model:value='form.name' placeholder='例如：本地文件助手' class='editor-input' />
             </div>
             <div class='field'>
-              <label class='field-label'>用途说明 <span class='optional'>（可选）</span></label>
+              <label class='field-label'>{{ t('ui.misc.047', '用途说明', '用途说明') }}<span class='optional'>{{ t('ui.misc.061', '（可选）', '（可选）') }}</span></label>
               <n-input v-model:value='form.description' type='textarea' :autosize='{ minRows: 2, maxRows: 3 }' placeholder='简要描述这个 MCP 的用途' class='editor-input' />
             </div>
           </div>
@@ -303,13 +304,13 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
         <section class='editor-section'>
           <div class='section-header'>
             <span class='section-icon'>🔌</span>
-            <h4>传输方式</h4>
+            <h4>{{ t('mcp.add.transport', '传输方式', '传输方式') }}</h4>
           </div>
           <div class='transport-toggle'>
             <button class='transport-btn' :class='{ active: form.transport === "stdio" }' type='button' @click='form.transport = "stdio"'>
               <span class='transport-icon'>⌨️</span>
               <span class='transport-name'>stdio</span>
-              <span class='transport-desc'>命令行</span>
+              <span class='transport-desc'>{{ t('ui.misc.018', '命令行', '命令行') }}</span>
             </button>
             <button class='transport-btn' :class='{ active: form.transport === "http" }' type='button' @click='form.transport = "http"'>
               <span class='transport-icon'>🌐</span>
@@ -318,8 +319,8 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
             </button>
           </div>
           <div class='field'>
-            <label v-if='form.transport === "stdio"' class='field-label'>启动命令</label>
-            <label v-else class='field-label'>服务地址</label>
+            <label v-if='form.transport === "stdio"' class='field-label'>{{ t('mcp.add.command', '启动命令', '启动命令') }}</label>
+            <label v-else class='field-label'>{{ t('mcp.add.url', '服务地址', '服务地址') }}</label>
             <n-input v-if='form.transport === "stdio"' v-model:value='form.command' placeholder='例如：npx / uvx / python' class='editor-input' />
             <n-input v-else v-model:value='form.url' placeholder='http://127.0.0.1:3000/mcp' class='editor-input' />
           </div>
@@ -329,19 +330,19 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
         <section class='editor-section'>
           <div class='section-header'>
             <span class='section-icon'>⚙️</span>
-            <h4>高级配置</h4>
+            <h4>{{ t('ui.misc.058', '高级配置', '高级配置') }}</h4>
           </div>
           <div class='field-group'>
             <div class='field'>
-              <label class='field-label'>启动参数 <span class='optional'>（JSON 数组）</span></label>
+              <label class='field-label'>{{ t('ui.misc.017', '启动参数', '启动参数') }}<span class='optional'>{{ t('ui.misc.060', '（JSON 数组）', '（JSON 数组）') }}</span></label>
               <n-input v-if='form.transport === "stdio"' v-model:value='argsText' type='textarea' :autosize='{ minRows: 2, maxRows: 5 }' placeholder='["-y", "@modelcontextprotocol/server-filesystem"]' class='editor-input mono' />
               <div v-else class='field-hint-box'>
                 <span class='field-hint-icon'>💡</span>
-                <span>HTTP 模式无需启动参数</span>
+                <span>{{ t('ui.misc.002', 'HTTP 模式无需启动参数', 'HTTP 模式无需启动参数') }}</span>
               </div>
             </div>
             <div class='field'>
-              <label class='field-label'>环境变量 <span class='optional'>（JSON 对象）</span></label>
+              <label class='field-label'>{{ t('mcp.add.env', '环境变量', '环境变量') }}<span class='optional'>{{ t('ui.misc.059', '（JSON 对象）', '（JSON 对象）') }}</span></label>
               <n-input v-model:value='envText' type='textarea' :autosize='{ minRows: 2, maxRows: 5 }' placeholder='{"API_KEY": "sk-xxx"}' class='editor-input mono' />
             </div>
           </div>
@@ -349,7 +350,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
       </div>
       <template #footer>
         <div class='editor-footer'>
-          <n-button quaternary @click='editorOpen = false'>取消</n-button>
+          <n-button quaternary @click='editorOpen = false'>{{ t('chat.perm.confirm.cancel', '取消', '取消') }}</n-button>
           <n-button type='primary' :loading='saving' @click='saveServer'>
             {{ editingId ? '更新配置' : '添加服务' }}
           </n-button>

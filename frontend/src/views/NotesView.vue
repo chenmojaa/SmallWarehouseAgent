@@ -6,6 +6,7 @@ const dateTo = ref('')
 function applyFilter() { /* hook into existing search */ }
 
 import { ref, computed, onMounted } from 'vue'
+import { t } from '@/i18n'
 import { useNotesStore } from '@/stores/notes'
 import {
   getFeishuConfig,
@@ -266,10 +267,10 @@ function openExternal(url?: string | null) {
     <header class="page-hero">
       <div>
         <span class="eyebrow">KNOWLEDGE BASE</span>
-        <h1>知识库</h1>
-        <p>集中管理本地文件、网页、文本，以及飞书文档和多维表格。</p>
+        <h1>{{ t('nav.notes', '知识库', '知识库') }}</h1>
+        <p>{{ t('ui.sync.004', '集中管理本地文件、网页、文本，以及飞书文档和多维表格。', '集中管理本地文件、网页、文本，以及飞书文档和多维表格。') }}</p>
       </div>
-      <n-button secondary :loading="refreshingSources" @click="loadFeishuData">刷新状态</n-button>
+      <n-button secondary :loading="refreshingSources" @click="loadFeishuData">{{ t('ui.misc.012', '刷新状态', '刷新状态') }}</n-button>
     </header>
 
     <section class="metrics-grid">
@@ -283,8 +284,8 @@ function openExternal(url?: string | null) {
     <n-card class="panel-card" :bordered="false">
       <template #header>
         <div class="panel-title">
-          <strong>添加内容</strong>
-          <span>新内容会自动解析并进入检索索引</span>
+          <strong>{{ t('ui.misc.046', '添加内容', '添加内容') }}</strong>
+          <span>{{ t('ui.misc.035', '新内容会自动解析并进入检索索引', '新内容会自动解析并进入检索索引') }}</span>
         </div>
       </template>
       <div class="segment-tabs">
@@ -304,27 +305,27 @@ function openExternal(url?: string | null) {
           <path d="m7 9 5-5 5 5" />
           <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
         </svg>
-        <strong>拖拽文件到这里</strong>
-        <p>PDF · DOCX · PPTX · XLSX · CSV · HTML · TXT/MD · 图片 OCR</p>
+        <strong>{{ t('ui.misc.031', '拖拽文件到这里', '拖拽文件到这里') }}</strong>
+        <p>{{ t('ui.misc.003', 'PDF · DOCX · PPTX · XLSX · CSV · HTML · TXT/MD · 图片 OCR', 'PDF · DOCX · PPTX · XLSX · CSV · HTML · TXT/MD · 图片 OCR') }}</p>
         <n-upload :accept="ACCEPT" :custom-request="uploadHandler" :show-file-list="false" multiple>
-          <n-button type="primary" round>选择文件</n-button>
+          <n-button type="primary" round>{{ t('ui.misc.053', '选择文件', '选择文件') }}</n-button>
         </n-upload>
         <div v-if="notes.uploadProgress" class="progress-note" :class="notes.uploadProgress.status">
           <n-spin v-if="notes.uploadProgress.status === 'uploading'" size="small" />
           <span>{{ notes.uploadProgress.name }} {{ notes.uploadProgress.status === 'uploading' ? '处理中' : notes.uploadProgress.status === 'done' ? '完成' : notes.uploadProgress.status === 'canceled' ? '已取消' : notes.uploadProgress.message }}</span>
-          <button v-if="notes.uploadProgress.status === 'uploading'" class="cancel-btn" @click="notes.cancelUpload()">取消</button>
+          <button v-if="notes.uploadProgress.status === 'uploading'" class="cancel-btn" @click="notes.cancelUpload()">{{ t('chat.perm.confirm.cancel', '取消', '取消') }}</button>
         </div>
       </div>
 
       <div v-else-if="tab === 'url'" class="inline-form">
-        <n-input v-model:value="urlInput" placeholder="粘贴文章链接" size="large" @keyup.enter="addUrl" />
-        <n-button type="primary" size="large" :loading="notes.ingesting" @click="addUrl">抓取入库</n-button>
+        <n-input v-model:value="urlInput" placeholder="t('ui.notes.004', '粘贴文章链接', '粘贴文章链接')" size="large" @keyup.enter="addUrl" />
+        <n-button type="primary" size="large" :loading="notes.ingesting" @click="addUrl">{{ t('ui.notes.002', '抓取入库', '抓取入库') }}</n-button>
       </div>
 
       <div v-else class="stack-form">
-        <n-input v-model:value="textTitle" placeholder="标题（可选）" />
-        <n-input v-model:value="textInput" type="textarea" :autosize="{ minRows: 5, maxRows: 12 }" placeholder="粘贴需要保存的文本…" />
-        <n-button type="primary" :loading="notes.ingesting" @click="addText">保存并入库</n-button>
+        <n-input v-model:value="textTitle" placeholder="t('ui.misc.043', '标题（可选）', '标题（可选）')" />
+        <n-input v-model:value="textInput" type="textarea" :autosize="{ minRows: 5, maxRows: 12 }" placeholder="t('ui.notes.005', '粘贴需要保存的文本…', '粘贴需要保存的文本…')" />
+        <n-button type="primary" :loading="notes.ingesting" @click="addText">{{ t('ui.notes.001', '保存并入库', '保存并入库') }}</n-button>
       </div>
     </n-card>
 
@@ -334,14 +335,14 @@ function openExternal(url?: string | null) {
           {{ filter.label }}
         </button>
       </div>
-      <n-input v-model:value="keyword" placeholder="搜索标题或摘要" clearable size="large" />
+      <n-input v-model:value="keyword" placeholder="t('ui.misc.033', '搜索标题或摘要', '搜索标题或摘要')" clearable size="large" />
     </div>
 
     <n-card v-if="showFeishu" class="panel-card feishu-panel" :bordered="false">
       <template #header>
         <div class="panel-title">
-          <span class="source-badge feishu">飞</span>
-          <strong>飞书知识库</strong>
+          <span class="source-badge feishu">{{ t('ui.misc.057', '飞', '飞') }}</span>
+          <strong>{{ t('ui.notes.007', '飞书知识库', '飞书知识库') }}</strong>
           <small class="status-line">
             <i :class="['status-dot', { online: !!feishuStatus?.enabled }]"></i>
             {{ feishuStatus?.enabled ? '已连接' : '未启用' }}
@@ -358,11 +359,11 @@ function openExternal(url?: string | null) {
       </template>
 
       <div v-if="!feishuStatus?.enabled" class="empty-surface">
-        <n-empty description="当前尚未启用飞书同步" />
+        <n-empty description="t('ui.sync.001', '当前尚未启用飞书同步', '当前尚未启用飞书同步')" />
       </div>
       <template v-else>
         <div v-if="feishuSpaces.length" class="space-flow">
-          <button class="space-chip" :class="{ selected: selectedSpaceId === null }" @click="selectSpace()">全部空间</button>
+          <button class="space-chip" :class="{ selected: selectedSpaceId === null }" @click="selectSpace()">{{ t('ui.misc.011', '全部空间', '全部空间') }}</button>
           <button
             v-for="space in feishuSpaces"
             :key="space.space_id"
@@ -387,9 +388,9 @@ function openExternal(url?: string | null) {
         </div>
 
         <div v-if="notes.loading && visibleFeishuNotes.length === 0" class="loading-row">
-          <n-spin size="small" /><span>正在加载飞书内容…</span>
+          <n-spin size="small" /><span>{{ t('ui.sync.003', '正在加载飞书内容…', '正在加载飞书内容…') }}</span>
         </div>
-        <n-empty v-else-if="visibleFeishuNotes.length === 0" description="暂无同步后的飞书内容" />
+        <n-empty v-else-if="visibleFeishuNotes.length === 0" description="t('ui.sync.002', '暂无同步后的飞书内容', '暂无同步后的飞书内容')" />
         <div v-else class="note-list">
           <article v-for="note in visibleFeishuNotes" :key="note.id" class="note-item">
             <div class="note-main">
@@ -397,17 +398,17 @@ function openExternal(url?: string | null) {
                 <strong>{{ decodeUnicode(note.title) }}</strong>
                 <n-tag size="small" round :type="sourceTone(note.source_type) as any">{{ sourceLabel(note.source_type) }}</n-tag>
                 <n-tag v-if="note.embedded" size="small" round :bordered="false">{{ note.chunk_count }} 块</n-tag>
-                <n-tag v-else size="small" round type="warning">待索引</n-tag>
+                <n-tag v-else size="small" round type="warning">{{ t('ui.misc.024', '待索引', '待索引') }}</n-tag>
               </div>
               <p v-if="note.summary">{{ decodeUnicode(note.summary) }}</p>
             </div>
             <div class="note-actions">
               <span>{{ formatDate(note.created_at) }}</span>
-              <a v-if="note.view_url" :href="note.view_url" target="_blank" rel="noreferrer">查看</a>
-              <button @click="downloadNote(note.id, note.title)">下载</button>
-              <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">重建索引</button>
+              <a v-if="note.view_url" :href="note.view_url" target="_blank" rel="noreferrer">{{ t('ui.misc.042', '查看', '查看') }}</a>
+              <button @click="downloadNote(note.id, note.title)">{{ t('ui.misc.005', '下载', '下载') }}</button>
+              <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">{{ t('ui.misc.054', '重建索引', '重建索引') }}</button>
               <n-popconfirm @positive-click="removeNote(note.id)">
-                <template #trigger><button class="danger">删除</button></template>
+                <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
                 删除该笔记？
               </n-popconfirm>
             </div>
@@ -419,16 +420,16 @@ function openExternal(url?: string | null) {
     <n-card v-if="showLocal" class="panel-card" :bordered="false">
       <template #header>
         <div class="panel-title">
-          <span class="source-badge local">本地</span>
-          <strong>本地内容</strong>
+          <span class="source-badge local">{{ t('ui.misc.037', '本地', '本地') }}</span>
+          <strong>{{ t('ui.misc.038', '本地内容', '本地内容') }}</strong>
           <small>{{ visibleLocalNotes.length }} 条</small>
         </div>
       </template>
 
       <div v-if="notes.loading && visibleLocalNotes.length === 0" class="loading-row">
-        <n-spin size="small" /><span>正在加载…</span>
+        <n-spin size="small" /><span>{{ t('ui.misc.044', '正在加载…', '正在加载…') }}</span>
       </div>
-      <n-empty v-else-if="visibleLocalNotes.length === 0" description="还没有本地知识内容" />
+      <n-empty v-else-if="visibleLocalNotes.length === 0" description="t('ui.notes.006', '还没有本地知识内容', '还没有本地知识内容')" />
       <div v-else class="note-list">
         <article v-for="note in visibleLocalNotes" :key="note.id" class="note-item">
             <div class="note-main">
@@ -436,17 +437,17 @@ function openExternal(url?: string | null) {
                 <strong>{{ decodeUnicode(note.title) }}</strong>
                 <n-tag size="small" round :type="sourceTone(note.source_type) as any">{{ sourceLabel(note.source_type) }}</n-tag>
                 <n-tag v-if="note.embedded" size="small" round :bordered="false">{{ note.chunk_count }} 块</n-tag>
-                <n-tag v-else size="small" round type="warning">待索引</n-tag>
+                <n-tag v-else size="small" round type="warning">{{ t('ui.misc.024', '待索引', '待索引') }}</n-tag>
               </div>
               <p v-if="note.summary">{{ decodeUnicode(note.summary) }}</p>
             </div>
           <div class="note-actions">
             <span>{{ formatDate(note.created_at) }}</span>
-            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">打开</button>
-            <button @click="downloadNote(note.id, note.title)">下载</button>
-            <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">重建索引</button>
+            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">{{ t('notes.open', '打开', '打开') }}</button>
+            <button @click="downloadNote(note.id, note.title)">{{ t('ui.misc.005', '下载', '下载') }}</button>
+            <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">{{ t('ui.misc.054', '重建索引', '重建索引') }}</button>
             <n-popconfirm @positive-click="removeNote(note.id)">
-              <template #trigger><button class="danger">删除</button></template>
+              <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
               删除该笔记？
             </n-popconfirm>
           </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { t } from '@/i18n'
 import { useRoute } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
@@ -110,12 +111,12 @@ function onKey(e: KeyboardEvent) {
 <template>
   <div v-if="chat.error && !chat.isStreaming" class="load-error">
     <span>{{ chat.error }}</span>
-    <n-button size="tiny" quaternary @click="loadByRoute">重试</n-button>
+    <n-button size="tiny" quaternary @click="loadByRoute">{{ t('common.retry', '重试', '重试') }}</n-button>
   </div>
   <!-- 空对话时：用 welcome 布局把问候语 + 输入框一起垂直居中上半屏 -->
   <div v-if="chat.messages.length === 0" class="welcome-layout">
     <div class="welcome">
-      <div class="welcome-text">嗨，有什么我可以帮助你的？</div>
+      <div class="welcome-text">{{ t('chat.welcome', '嗨，有什么我可以帮助你的？', '嗨，有什么我可以帮助你的？') }}</div>
     </div>
     <div class="chat-container input-container-welcome">
       <div class="input-bar">
@@ -123,7 +124,7 @@ function onKey(e: KeyboardEvent) {
           v-model:value="input"
           type="textarea"
           :autosize="{ minRows: 2, maxRows: 10 }"
-          placeholder="输入消息，回车发送，Shift+Enter 换行"
+          placeholder="t('chat.input.placeholder', '输入消息，回车发送，Shift+Enter 换行', '输入消息，回车发送，Shift+Enter 换行')"
           @keydown="onKey"
           class="chat-input"
           :bordered="false"
@@ -139,7 +140,7 @@ function onKey(e: KeyboardEvent) {
             <span>Plan</span>
           </button>
           <div class="rag-group">
-            <span class="rag-label">知识库</span>
+            <span class="rag-label">{{ t('nav.notes', '知识库', '知识库') }}</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
           </div>
           <div class="rag-group perm-group" :title="chat.agentPermission === 'full' ? '完全访问：Agent 可直接访问本机磁盘，不再询问' : '默认权限：Agent 访问本地文件前会先询问你'">
@@ -149,7 +150,7 @@ function onKey(e: KeyboardEvent) {
               size="tiny"
               class="perm-select"
               :class="{ 'perm-full': chat.agentPermission === 'full' }"
-              placeholder="默认权限"
+              placeholder="t('chat.perm.default', '默认权限', '默认权限')"
               @update:value="onPermissionChange"
             />
           </div>
@@ -167,7 +168,7 @@ function onKey(e: KeyboardEvent) {
       </div>
       <div class="footer-hint">
         <span class="hint-icon">📨</span>
-        <span>有问题尽管问，开启后会检索你的知识库回答</span>
+        <span>{{ t('chat.kb.hint', '有问题尽管问，开启后会检索你的知识库回答', '有问题尽管问，开启后会检索你的知识库回答') }}</span>
       </div>
     </div>
   </div>
@@ -180,7 +181,7 @@ function onKey(e: KeyboardEvent) {
           <!-- 任务规划进度条：计划步骤 pending/running/done + 命中数 -->
           <div v-if="m.role === 'assistant' && m.planSteps && m.planSteps.length" class="plan-strip">
             <div class="plan-head">
-              <span class="plan-label">检索计划</span>
+              <span class="plan-label">{{ t('chat.plan.summary', '检索计划', '检索计划') }}</span>
               <span v-if="m.planSummary" class="plan-summary">{{ m.planSummary }}</span>
             </div>
             <div class="plan-steps">
@@ -231,16 +232,16 @@ function onKey(e: KeyboardEvent) {
           </template>
           <div v-if="m.role !== 'system'" class="msg-actions">
             <span class="msg-time">{{ formatMsgTime(m.id) }}</span>
-            <button class="msg-act" type="button" title="复制" :class="{ clicked: clickedAct === 'copy' }" @click="copyMsg(m)">
+            <button class="msg-act" type="button" title="t('chat.msg.copy', '复制', '复制')" :class="{ clicked: clickedAct === 'copy' }" @click="copyMsg(m)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
-            <button v-if="m.role === 'assistant'" class="msg-act" type="button" title="重新生成" :class="{ clicked: clickedAct === 'regen' }" @click="chat.regenerate(); flashAct('regen')">
+            <button v-if="m.role === 'assistant'" class="msg-act" type="button" title="t('chat.msg.regenerate', '重新生成', '重新生成')" :class="{ clicked: clickedAct === 'regen' }" @click="chat.regenerate(); flashAct('regen')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             </button>
-            <button class="msg-act" type="button" title="删除" :class="{ clicked: clickedAct === 'delete' }" @click="chat.deleteMessage(m.id); flashAct('delete')">
+            <button class="msg-act" type="button" title="t('chat.msg.delete', '删除', '删除')" :class="{ clicked: clickedAct === 'delete' }" @click="chat.deleteMessage(m.id); flashAct('delete')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
             </button>
-            <button class="msg-act" type="button" title="回退" :class="{ clicked: clickedAct === 'undo' }" @click="chat.undoLast(); flashAct('undo')">
+            <button class="msg-act" type="button" title="t('chat.msg.undo', '回退', '回退')" :class="{ clicked: clickedAct === 'undo' }" @click="chat.undoLast(); flashAct('undo')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
             </button>
           </div>
@@ -253,7 +254,7 @@ function onKey(e: KeyboardEvent) {
           />
           <IngestResultCard v-if="m.role === 'assistant' && m.ingest" :data="m.ingest" class="ingest-row" />
           <div v-if="m.role === 'assistant' && m.report" class="report-row">
-            <div class="report-head">周报已生成</div>
+            <div class="report-head">{{ t('chat.report.head', '周报已生成', '周报已生成') }}</div>
             <div v-if="m.report.message" class="report-msg">{{ m.report.message }}</div>
             <div v-else-if="m.report.summary" class="report-summary">{{ m.report.summary }}</div>
             <div v-if="m.report.note_id" class="report-meta">已存为笔记 #{{ m.report.note_id.slice(0, 8) }}</div>
@@ -268,7 +269,7 @@ function onKey(e: KeyboardEvent) {
           v-model:value="input"
           type="textarea"
           :autosize="{ minRows: 2, maxRows: 10 }"
-          placeholder="输入消息，回车发送，Shift+Enter 换行"
+          placeholder="t('chat.input.placeholder', '输入消息，回车发送，Shift+Enter 换行', '输入消息，回车发送，Shift+Enter 换行')"
           @keydown="onKey"
           class="chat-input"
           :bordered="false"
@@ -284,7 +285,7 @@ function onKey(e: KeyboardEvent) {
             <span>Plan</span>
           </button>
           <div class="rag-group">
-            <span class="rag-label">知识库</span>
+            <span class="rag-label">{{ t('nav.notes', '知识库', '知识库') }}</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
           </div>
           <div class="rag-group perm-group" :title="chat.agentPermission === 'full' ? '完全访问：Agent 可直接访问本机磁盘，不再询问' : '默认权限：Agent 访问本地文件前会先询问你'">
@@ -294,7 +295,7 @@ function onKey(e: KeyboardEvent) {
               size="tiny"
               class="perm-select"
               :class="{ 'perm-full': chat.agentPermission === 'full' }"
-              placeholder="默认权限"
+              placeholder="t('chat.perm.default', '默认权限', '默认权限')"
               @update:value="onPermissionChange"
             />
           </div>
@@ -317,28 +318,28 @@ function onKey(e: KeyboardEvent) {
   <n-modal :show="!!chat.pendingPermission" @update:show="(v: boolean) => { if (!v) chat.resolvePermission(false) }" :mask-closable="false">
     <div v-if="chat.pendingPermission" class="perm-dialog">
       <div class="perm-dialog-icon">🔐</div>
-      <h3 class="perm-dialog-title">助手请求访问本地资源</h3>
-      <p class="perm-dialog-desc">助手正在「默认权限」模式下运行，执行以下操作前需要你的确认：</p>
+      <h3 class="perm-dialog-title">{{ t('chat.perm.dialog.title', '助手请求访问本地资源', '助手请求访问本地资源') }}</h3>
+      <p class="perm-dialog-desc">{{ t('ui.misc.013', '助手正在「默认权限」模式下运行，执行以下操作前需要你的确认：', '助手正在「默认权限」模式下运行，执行以下操作前需要你的确认：') }}</p>
       <div class="perm-dialog-detail">
-        <div class="perm-row"><span class="perm-k">工具</span><code>{{ chat.pendingPermission.tool }}</code></div>
-        <div class="perm-row"><span class="perm-k">参数</span><code class="perm-args">{{ JSON.stringify(chat.pendingPermission.args, null, 2) }}</code></div>
+        <div class="perm-row"><span class="perm-k">{{ t('chat.perm.dialog.tool', '工具', '工具') }}</span><code>{{ chat.pendingPermission.tool }}</code></div>
+        <div class="perm-row"><span class="perm-k">{{ t('chat.perm.dialog.args', '参数', '参数') }}</span><code class="perm-args">{{ JSON.stringify(chat.pendingPermission.args, null, 2) }}</code></div>
       </div>
       <div class="perm-dialog-actions">
-        <n-button @click="chat.resolvePermission(false)">拒绝</n-button>
-        <n-button type="primary" @click="chat.resolvePermission(true)">允许本次访问</n-button>
+        <n-button @click="chat.resolvePermission(false)">{{ t('chat.perm.dialog.deny', '拒绝', '拒绝') }}</n-button>
+        <n-button type="primary" @click="chat.resolvePermission(true)">{{ t('chat.perm.dialog.allow', '允许本次访问', '允许本次访问') }}</n-button>
       </div>
-      <p class="perm-dialog-hint">如不想每次确认，可在输入框下方开启「完全访问」权限</p>
+      <p class="perm-dialog-hint">{{ t('ui.misc.020', '如不想每次确认，可在输入框下方开启「完全访问」权限', '如不想每次确认，可在输入框下方开启「完全访问」权限') }}</p>
     </div>
   </n-modal>
 
   <!-- 开启完全访问的二次确认弹窗 -->
   <n-modal :show="confirmFullOpen" @update:show="(v: boolean) => { if (!v) confirmFullOpen = false }" :mask-closable="false">
     <div class="perm-dialog perm-confirm-dialog">
-      <h3 class="perm-dialog-title">⚠️ 确认开启完全访问？</h3>
-      <p class="perm-dialog-desc">开启后，<strong>Agent 可以直接读写本机所有磁盘的文件</strong>，执行操作前<strong class="danger-text">不再询问你</strong>。请确认你了解其中的风险。可随时切回「默认权限」恢复逐次确认。</p>
+      <h3 class="perm-dialog-title">{{ t('chat.perm.confirm.title', '⚠️ 确认开启完全访问？', '⚠️ 确认开启完全访问？') }}</h3>
+      <p class="perm-dialog-desc">{{ t('ui.misc.023', '开启后，', '开启后，') }}<strong>{{ t('ui.misc.001', 'Agent 可以直接读写本机所有磁盘的文件', 'Agent 可以直接读写本机所有磁盘的文件') }}</strong>{{ t('ui.misc.062', '，执行操作前', '，执行操作前') }}<strong class="danger-text">{{ t('ui.misc.007', '不再询问你', '不再询问你') }}</strong>{{ t('ui.misc.004', '。请确认你了解其中的风险。可随时切回「默认权限」恢复逐次确认。', '。请确认你了解其中的风险。可随时切回「默认权限」恢复逐次确认。') }}</p>
       <div class="perm-dialog-actions">
-        <n-button @click="confirmFullOpen = false">取消</n-button>
-        <n-button type="error" @click="confirmFullAccess">我已了解，开启完全访问</n-button>
+        <n-button @click="confirmFullOpen = false">{{ t('chat.perm.confirm.cancel', '取消', '取消') }}</n-button>
+        <n-button type="error" @click="confirmFullAccess">{{ t('chat.perm.confirm.ok', '我已了解，开启完全访问', '我已了解，开启完全访问') }}</n-button>
       </div>
     </div>
   </n-modal>

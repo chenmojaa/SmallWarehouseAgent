@@ -547,6 +547,24 @@ def delete_fact(fact_id: int) -> bool:
   return True
 
 
+def update_fact(fact_id: int, content: str) -> bool:
+  """Edit an existing fact in place. Re-normalises so the dedup key stays consistent."""
+  content = (content or "").strip()
+  if not content:
+    return False
+  key = _norm_fact(content)
+  with get_session() as s:
+    row = s.get(MemoryFact, fact_id)
+    if not row:
+      return False
+    row.content = content
+    row.norm_key = key
+    row.updated_at = datetime.now(timezone.utc)
+    s.add(row)
+    s.commit()
+  return True
+
+
 def recall_facts(query: str, limit: int = 8) -> list[str]:
   """跨会话召回：按与当前问题的字符重叠启发式排序 + 时间倒序。
 

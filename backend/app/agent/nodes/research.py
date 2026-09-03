@@ -95,7 +95,19 @@ def execute_plan_node(state: AgentState) -> dict:
 
     Each new chunk is tagged with ``matched_query`` so the answer prompt can
     tell which sub-question each piece of reference material answers.
+
+    Fast path: when parallel_plan_enabled is on and we are at the start of
+    a multi-step plan, hand off to parallel_plan_node which gathers all
+    sub-queries with a ThreadPoolExecutor. The serial path stays as the
+    safe fallback.
     """
+    if (
+      settings.parallel_plan_enabled
+      and int(state.get("plan_cursor") or 0) == 0
+      and len(state.get("plan") or []) > 1
+    ):
+        return parallel_plan_node(state)
+
     plan = state.get("plan") or []
     cursor = int(state.get("plan_cursor") or 0)
     if cursor >= len(plan):
@@ -186,3 +198,79 @@ def replan_node(state: AgentState) -> dict:
         "replan_stalled": False,
         "step_count": state.get("step_count", 0) + 1,
     }
+
+
+
+def parallel_plan_node(state: AgentState) -> dict:
+  """Run all plan steps concurrently with asyncio.gather (HANDOFF §5).
+
+  Falls back to the serial execute_plan_node when:
+    - parallel_plan_enabled is False
+    - the plan has 0 or 1 step (no parallelism to exploit)
+    - the cursor is already mid-plan (legacy loop support)
+
+  Each step performs an independent hybrid_search, then we merge the
+  results, dedupe by (note_id, chunk_index), and tag every chunk with
+  matched_query = the step's query string so the answer prompt can show
+  "step N found X" attributions.
+
+  Failure isolation: if one step's hybrid_search raises, we log it and
+  return whatever the other steps produced, plus a step_count +=1.
+  """
+  from concurrent.futures import ThreadPoolExecutor
+  from app.agent.nodes.research import _search
+
+  plan = state.get("plan") or []
+  cursor = int(state.get("plan_cursor") or 0)
+  if (
+    not settings.parallel_plan_enabled
+    or len(plan) <= 1
+    or cursor != 0
+  ):
+    # Defer to the serial executor.
+    return execute_plan_node(state)
+
+  api_key = state.get("api_key_override")
+  base_url = state.get("base_url_override")
+
+  queries = [str(s.get("query") or "").strip() for s in plan]
+  workers = min(len(queries), max(1, int(getattr(settings, "parallel_plan_max_workers", 4))))
+
+  def _run_one(args):
+    idx, q = args
+    if not q:
+      return idx, []
+    try:
+      hits = _search(q, api_key, base_url)
+    except Exception as e:
+      _log.warning("parallel_plan: step %d failed (q=%r): %s", idx + 1, q[:60], e)
+      return idx, []
+    return idx, hits
+
+  with ThreadPoolExecutor(max_workers=workers) as pool:
+    results = list(pool.map(_run_one, list(enumerate(queries))))
+
+  seen: set = {_seen_key(c) for c in (state.get("retrieved_chunks") or [])}
+  collected: list = list(state.get("retrieved_chunks") or [])
+  plan_status: list = list(state.get("plan_status") or [])
+  for idx, hits in results:
+    q = queries[idx]
+    new_chunks: list = []
+    for c in hits:
+      if _seen_key(c) in seen:
+        continue
+      seen.add(_seen_key(c))
+      c["matched_query"] = q
+      new_chunks.append(c)
+    collected.extend(new_chunks)
+    plan_status.append({"query": q, "hits": len(new_chunks)})
+    _log.info("parallel_plan: step %d/%d q=%r hits=%d",
+              idx + 1, len(plan), q[:60], len(new_chunks))
+
+  return {
+    "retrieved_chunks": collected,
+    "plan_cursor": len(plan),
+    "plan_status": plan_status,
+    "research_iterations": int(state.get("research_iterations") or 0) + 1,
+    "step_count": int(state.get("step_count") or 0) + 1,
+  }

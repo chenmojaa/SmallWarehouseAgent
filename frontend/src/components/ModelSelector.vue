@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { t } from '@/i18n'
 import { useModelsStore, type ReasoningLevel } from '@/stores/models'
 import { detectModels } from '@/api/custom-models'
 import { NSelect, NButton, NInput, NModal, NTag, useMessage } from 'naive-ui'
@@ -139,7 +140,7 @@ async function saveEntry() {
 
 <template>
   <!-- Empty state: single CTA that actually opens an add-model dialog -->
-  <n-button v-if="!hasAny" size="small" type="primary" @click="openAdd">+ 添加模型</n-button>
+  <n-button v-if="!hasAny" size="small" type="primary" @click="openAdd">{{ t('ui.models.001', '+ 添加模型', '+ 添加模型') }}</n-button>
 
   <div v-else class="model-selector-group">
     <n-select
@@ -167,13 +168,13 @@ async function saveEntry() {
     @update:show="(v) => addOpen = v"
     :mask-closable="!detecting && !saving"
     preset="card"
-    title="添加模型"
+    title="t('ui.models.003', '添加模型', '添加模型')"
     style="width: 460px; max-width: 92vw;"
   >
     <div class="add-form">
       <div class="form-row">
-        <label>名称 <span class="hint">（可选）</span></label>
-        <n-input v-model:value="formName" placeholder="给这套配置起个名字" />
+        <label>{{ t('mcp.add.name', '名称', '名称') }}<span class="hint">{{ t('ui.misc.061', '（可选）', '（可选）') }}</span></label>
+        <n-input v-model:value="formName" placeholder="t('ui.misc.049', '给这套配置起个名字', '给这套配置起个名字')" />
       </div>
       <div class="form-row">
         <label>Base URL</label>
@@ -184,7 +185,7 @@ async function saveEntry() {
         <n-input v-model:value="formApiKey" type="password" show-password-on="click" />
       </div>
       <div class="actions">
-        <n-button :loading="detecting" @click="doDetect">识别模型</n-button>
+        <n-button :loading="detecting" @click="doDetect">{{ t('ui.models.005', '识别模型', '识别模型') }}</n-button>
         <n-button v-if="detected" :loading="saving" type="primary" @click="saveEntry">
           保存（{{ detected.models.length }}）
         </n-button>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { t } from '@/i18n'
 import { Marked, type Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import mermaid from 'mermaid'
@@ -240,13 +241,13 @@ onBeforeUnmount(() => {
   <div :class="['bubble-row', role]">
     <div :class="['bubble', role]">
       <details v-if="role === 'assistant' && think" ref="detailsRef" class="think-section">
-        <summary>思考过程</summary>
+        <summary>{{ t('ui.misc.025', '思考过程', '思考过程') }}</summary>
         <div class="think-body">{{ think }}</div>
       </details>
       <div v-if="role === 'assistant'" ref="bubbleEl" class="md-body" v-html="renderedHtml"></div>
       <div v-else class="plain-body">{{ bodyNoCite }}</div>
       <div v-if="role === 'assistant' && validSourceTokens.length" class="source-line">
-        <span>来源：</span>
+        <span>{{ t('ui.misc.040', '来源：', '来源：') }}</span>
         <button
           v-for="n in validSourceTokens"
           :key="n"

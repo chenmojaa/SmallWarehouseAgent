@@ -60,6 +60,7 @@ class Settings(BaseSettings):
   research_target_chunks: int = 8              # HD_RESEARCH_TARGET_CHUNKS
   planner_enabled: bool = True                  # HD_PLANNER_ENABLED; task planning before research
   planner_max_steps: int = 4                    # HD_PLANNER_MAX_STEPS; max sub-queries per plan
+  parallel_plan_enabled: bool = True             # HD_PARALLEL_PLAN_ENABLED; run plan steps concurrently with asyncio.gather                    # HD_PLANNER_MAX_STEPS; max sub-queries per plan
   memory_extraction_enabled: bool = True        # HD_MEMORY_EXTRACTION_ENABLED; auto fact extraction after each turn
   memory_max_facts: int = 8                     # HD_MEMORY_MAX_FACTS; max recalled facts injected per turn
   ingest_provider: str = ""                    # empty = use main LLM for metadata extraction

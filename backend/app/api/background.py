@@ -100,42 +100,27 @@ class ReindexRequest(BaseModel):
   root_path: Optional[str] = None
 
 
-@router.post("/background/reindex")
-async def api_background_reindex(body: ReindexRequest):
-  """Spawn a background reindex and stream its progress as SSE."""
+def _spawn_job(kind, cmd, total=0):
+  """Generic background-job spawner shared by every kind."""
   job_id = "bg_" + uuid.uuid4().hex[:12]
-  # Snapshot how many files there are so the consumer can render a progress
-  # bar from the streamed line counts.
-  from app.storage import db as _db
-  total = _db.note_count() if hasattr(_db, "note_count") else 0
-  script = ["-m", "app.scripts.reindex_all"]
-  if body.scope:
-    script += ["--scope", body.scope]
-  if body.root_path:
-    script += ["--root", body.root_path]
-  import sys as _sys
-  cmd = [_sys.executable or "python"] + script
   job_dir = _jobs_path()
   log_path = job_dir / (job_id + ".log")
   _jobs[job_id] = {
     "id": job_id,
-    "kind": "reindex",
+    "kind": kind,
     "started_at": time.time(),
     "log": str(log_path),
+    "total": total,
   }
   with open(log_path, "wb") as lf:
-    pass  # truncate / create
+    pass
 
   def generate():
-    """Sync SSE generator. Drives the async producer in the background.
-    Each iter pulls one JSON-encoded event from the queue and emits an SSE
-    frame. Falls back to a final error frame if the producer dies early.
-    """
     loop = asyncio.new_event_loop()
-    q: "asyncio.Queue[str]" = asyncio.Queue(maxsize=128)
+    q = asyncio.Queue(maxsize=128)
     logf = open(log_path, "ab", buffering=0)
 
-    def _emit(raw: str) -> str:
+    def _emit(raw):
       logf.write(raw.encode("utf-8") + b"\n")
       return "event: background\ndata: " + raw + "\n\n"
 
@@ -152,7 +137,7 @@ async def api_background_reindex(body: ReindexRequest):
           pass
 
     fut = asyncio.run_coroutine_threadsafe(_runner(), loop)
-    t_end = time.time() + 600  # hard cap; reindex shouldn't take > 10 min
+    t_end = time.time() + 600
     try:
       while True:
         if time.time() > t_end:
@@ -177,6 +162,24 @@ async def api_background_reindex(body: ReindexRequest):
   return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.post("/background/reindex")
+async def api_background_reindex(body: ReindexRequest):
+  """Spawn a background reindex and stream its progress as SSE.
+
+  Thin wrapper; see _spawn_job for the actual SSE plumbing.
+  """
+  from app.storage import db as _db
+  total = _db.note_count() if hasattr(_db, "note_count") else 0
+  import sys as _sys
+  script = ["-m", "app.scripts.reindex_all"]
+  if body.scope:
+    script += ["--scope", body.scope]
+  if body.root_path:
+    script += ["--root", body.root_path]
+  cmd = [_sys.executable or "python"] + script
+  return _spawn_job("reindex", cmd, total=total)
+
+
 @router.get("/background/jobs")
 async def api_background_jobs():
   """List recently-finished background jobs + tail of their log."""
@@ -191,3 +194,72 @@ async def api_background_jobs():
   # Newest first
   out.sort(key=lambda j: j.get("started_at") or 0, reverse=True)
   return {"items": out}
+
+
+class StartRequest(BaseModel):
+  """Generic background-task dispatch (Codex / Claude background parity).
+
+  ``kind`` selects which pipeline to spawn; ``params`` is a free-form key/value
+  bag forwarded to the matching handler. Each handler validates the params it
+  needs and rejects unknown kinds with HTTP 400.
+  """
+  kind: str
+  params: dict = {}
+
+
+_BACKGROUND_KINDS = ("reindex", "ocr_all", "sync_feishu", "embed_all")
+
+
+def _build_kind_cmd(kind: str, params: dict) -> tuple[list[str], int]:
+  """Return (cmd, total_count) for the given kind, or raise ValueError."""
+  import sys as _sys
+  py = _sys.executable or "python"
+  if kind == "reindex":
+    script = ["-m", "app.scripts.reindex_all"]
+    scope = params.get("scope")
+    root = params.get("root_path")
+    if scope:
+      script += ["--scope", str(scope)]
+    if root:
+      script += ["--root", str(root)]
+    from app.storage import db as _db
+    total = _db.note_count() if hasattr(_db, "note_count") else 0
+    return [py] + script, total
+  if kind == "ocr_all":
+    return [py, "-m", "app.scripts.ocr_all"], 0
+  if kind == "sync_feishu":
+    return [py, "-m", "app.scripts.sync_feishu"], 0
+  if kind == "embed_all":
+    # embed-only reindex: scope=notes forces a no-delete re-embed pass.
+    return [py, "-m", "app.scripts.reindex_all", "--scope", "notes"], 0
+  raise ValueError("unknown background kind: " + repr(kind))
+
+
+@router.post("/background/start")
+async def api_background_start(body: StartRequest):
+  """Spawn a background job by ``kind``. Returns SSE of its progress.
+
+  Kinds:
+    reindex       - walk all notes + recompute embeddings (existing behaviour)
+    ocr_all       - scan data/notes/ for image-only notes and OCR them
+    sync_feishu   - run one feishu sync cycle (independent of the 15-min loop)
+    embed_all     - reindex with scope=notes (fast path: no remote pull)
+  """
+  from fastapi import HTTPException
+  if body.kind not in _BACKGROUND_KINDS:
+    raise HTTPException(
+      status_code=400,
+      detail="unknown kind " + repr(body.kind) + "; valid: " + repr(sorted(_BACKGROUND_KINDS)),
+    )
+  try:
+    cmd, total = _build_kind_cmd(body.kind, body.params or {})
+  except ValueError as e:
+    raise HTTPException(status_code=400, detail=str(e))
+  return _spawn_job(body.kind, cmd, total=total)
+
+
+@router.get("/background/kinds")
+async def api_background_kinds():
+  """List available background-job kinds (UI uses this to render the picker)."""
+  return {"items": list(_BACKGROUND_KINDS)}
+

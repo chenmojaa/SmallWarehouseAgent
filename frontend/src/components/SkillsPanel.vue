@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
+import { t } from '@/i18n'
 import {
   downloadSkill,
   getSkillDetail,
@@ -225,7 +226,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
         size="small"
         round
         clearable
-        placeholder="搜索技能名称或描述"
+        placeholder="t('ui.skills.008', '搜索技能名称或描述', '搜索技能名称或描述')"
       >
         <template #prefix><span class="skill-search-icon">🔍</span></template>
       </n-input>
@@ -235,17 +236,17 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
     </div>
 
     <div class="panel-scroll">
-      <div v-if="skillsLoading" class="skill-state"><n-spin size="small" /><span>正在加载技能…</span></div>
+      <div v-if="skillsLoading" class="skill-state"><n-spin size="small" /><span>{{ t('ui.skills.009', '正在加载技能…', '正在加载技能…') }}</span></div>
       <div v-else-if="skillError" class="skill-alert">{{ skillError }}</div>
       <div v-if="uploadProgress" class="skill-success">{{ uploadProgress }}</div>
 
       <!-- 推荐技能区 -->
       <template v-if="!skillsLoading">
         <div class="section-title">
-          <h3>推荐技能</h3>
-          <span class="section-meta">来自 GitHub · anthropics/skills</span>
+          <h3>{{ t('ui.skills.007', '推荐技能', '推荐技能') }}</h3>
+          <span class="section-meta">{{ t('ui.misc.041', '来自 GitHub · anthropics/skills', '来自 GitHub · anthropics/skills') }}</span>
         </div>
-        <n-empty v-if="filteredRecommended.length === 0" class="empty-spacing" description="没有匹配的推荐技能" />
+        <n-empty v-if="filteredRecommended.length === 0" class="empty-spacing" description="t('ui.skills.010', '没有匹配的推荐技能', '没有匹配的推荐技能')" />
         <div v-else class="skill-grid">
           <article v-for="skill in filteredRecommended" :key="skill.id" class="skill-card">
             <div class="skill-card-top">
@@ -272,7 +273,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
 
         <!-- 我的技能区 -->
         <div class="section-title" style="margin-top: 26px">
-          <h3>我的技能</h3>
+          <h3>{{ t('ui.skills.005', '我的技能', '我的技能') }}</h3>
           <span class="section-meta">{{ installedSkills.length }} 个已导入</span>
         </div>
         <n-empty v-if="filteredInstalled.length === 0" class="empty-spacing" :description="skillSearch ? '没有匹配的技能' : '还没有本地技能，点击右上角「添加技能」上传导入'" />
@@ -291,9 +292,9 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
                 <button type="button" class="expand-toggle" @click="toggleSkillDetail(skill)">
                   {{ expandedSkillId === skill.id ? '收起 ▴' : '展开 ▾' }}
                 </button>
-                <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">来源</a>
+                <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">{{ t('ui.misc.039', '来源', '来源') }}</a>
                 <n-popconfirm @positive-click="removeSkill(skill.id)">
-                  <template #trigger><button type="button">删除</button></template>
+                  <template #trigger><button type="button">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
                   删除该技能？
                 </n-popconfirm>
               </div>
@@ -303,8 +304,8 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
               <template v-else-if="skillDetails[skill.id]">
                 <div class="detail-section">
                   <div class="detail-head">
-                    <strong>文件结构</strong>
-                    <n-button size="tiny" round type="primary" @click="handleDownload(skill.id)">下载 zip</n-button>
+                    <strong>{{ t('ui.misc.034', '文件结构', '文件结构') }}</strong>
+                    <n-button size="tiny" round type="primary" @click="handleDownload(skill.id)">{{ t('ui.misc.006', '下载 zip', '下载 zip') }}</n-button>
                   </div>
                   <ul class="file-tree">
                     <li v-for="file in skillDetails[skill.id].files" :key="file">
@@ -313,7 +314,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
                   </ul>
                 </div>
                 <details class="detail-section">
-                  <summary>SKILL.md 内容</summary>
+                  <summary>{{ t('ui.skills.002', 'SKILL.md 内容', 'SKILL.md 内容') }}</summary>
                   <pre class="skill-md">{{ skillDetails[skill.id].content }}</pre>
                 </details>
               </template>
@@ -324,9 +325,9 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
     </div>
 
     <!-- 添加技能弹窗：单一选择入口 -->
-    <n-modal v-model:show="uploadOpen" preset="card" title="添加技能" style="max-width: 460px">
+    <n-modal v-model:show="uploadOpen" preset="card" title="t('ui.skills.011', '添加技能', '添加技能')" style="max-width: 460px">
       <div class="skill-upload-body">
-        <p class="skill-upload-tip">请选择包含 <code>SKILL.md</code> 的技能文件夹或压缩包（.zip / .tar.gz / .tgz）</p>
+        <p class="skill-upload-tip">{{ t('ui.misc.051', '请选择包含', '请选择包含') }}<code>SKILL.md</code>{{ t('ui.skills.012', '的技能文件夹或压缩包（.zip / .tar.gz / .tgz）', '的技能文件夹或压缩包（.zip / .tar.gz / .tgz）') }}</p>
         <div
           class="skill-dropzone"
           :class="{ active: dragActive, disabled: uploading }"
@@ -337,7 +338,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
         >
           <span class="dropzone-icon">📂</span>
           <strong>{{ uploading ? '正在上传并解压…' : '点击选择文件夹或压缩包' }}</strong>
-          <p>也可以将技能文件夹直接拖拽到这里</p>
+          <p>{{ t('ui.skills.003', '也可以将技能文件夹直接拖拽到这里', '也可以将技能文件夹直接拖拽到这里') }}</p>
         </div>
         <input ref="pickInput" class="hidden-input" type="file" multiple @change="uploadPickedFiles">
       </div>

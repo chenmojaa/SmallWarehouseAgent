@@ -25,6 +25,42 @@ from app.agent.nodes.answer import answer_node_stream
 from app.agent.memory import summarize_overflow
 
 router = APIRouter(tags=["chat"])
+
+# Heuristic for "compare / contrast / multi-source" queries. When the user
+# message obviously calls for a multi-step plan (compare X vs Y, tabulate
+# differences, summarize across N sources), auto-flip use_planner so the
+# planner + parallel_plan_node kicks in instead of the cheap single-shot
+# retrieve path. The user can still force use_planner=false to disable.
+_AUTO_PLAN_KEYWORDS = (
+  "对比", "比较", "对照", "区别", "差异", "汇总", "综合", "总结",
+  "vs",
+  "compare", "compared", "tabulate", "summarise across", "summarize across",
+  "三家", "3家", "三个云", "几家", "几款",
+)
+_AUTO_PLAN_MIN_LEN = 6  # "对比 A" alone is 4 chars; pad a bit so single-word queries don't trigger
+
+
+def _auto_plan_triggered(query: str) -> bool:
+  if not query:
+    return False
+  if len(query.strip()) < _AUTO_PLAN_MIN_LEN:
+    return False
+  q = query.lower()
+  import re
+  for kw in _AUTO_PLAN_KEYWORDS:
+    kl = kw.lower()
+    if kl in q:
+      # Word-ish guard for the short ASCII keywords only. Chinese 2-char
+      # keywords (对比/比较/总结/汇总/综合/区别/差异/对照) are unambiguous
+      # inside CJK text, so substring match is fine. ASCII short tokens
+      # like "vs" get a boundary check so "vscode" doesn't false-fire.
+      if kl.isascii() and len(kl) <= 2:
+        if re.search(r"(?:^|\s|[^A-Za-z0-9])" + re.escape(kl) + r"(?:[^A-Za-z0-9]|$)", q):
+          return True
+      else:
+        return True
+  return False
+
 _log = logging.getLogger("chat")
 
 
@@ -168,7 +204,11 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "answer": None,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
-    "use_planner": body.use_planner,
+    "use_planner": (
+      body.use_planner
+      if body.use_planner is not None
+      else _auto_plan_triggered(query)
+    ),
     "subagent_mode": body.subagent,
   }
 
@@ -187,6 +227,43 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     raise HTTPException(status_code=400, detail="messages is empty")
 
   query = _extract_query(body.messages)
+  # Memory shortcut: "记住 X" / "forget X" / "/记住 X" handled inline so we
+  # do not consume an LLM call just to acknowledge.
+  if query:
+    cmd, payload = _detect_memory_command(query)
+    if cmd == "remember":
+      from app.storage.db import list_facts as _lf, save_facts as _sf
+      content = payload
+      norm = content.lower().strip()
+      if len(content) > 500:
+        ack = "内容太长了（最多 500 字），无法记住。"
+      elif any((f.get("content", "").lower().strip() == norm or norm in f.get("content", "").lower() or f.get("content", "").lower() in norm) for f in _lf(limit=500)):
+        ack = "这条已经在记忆里了，不用重复记住。"
+      elif _sf([content], session_id=body.session_id or "memory_cmd") > 0:
+        ack = "记下了：" + content
+      else:
+        ack = "记住失败，请稍后再试。"
+      async def _ack_stream():
+        yield "event: session\ndata: " + json.dumps({"session_id": body.session_id or "memory_cmd"}) + "\n\n"
+        yield "event: stage\ndata: " + json.dumps({"stage": "memory_shortcut", "action": "remember"}) + "\n\n"
+        yield "event: answer\ndata: " + json.dumps({"text": ack}) + "\n\n"
+        yield "event: done\ndata: {}\n\n"
+      return StreamingResponse(_ack_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    if cmd == "forget":
+      fid, fcontent = _pick_fact_to_forget(payload)
+      if fid is None:
+        ack = "没找到匹配的记忆。可以打开「记忆」页面看看有哪些条目。"
+      else:
+        from app.storage.db import delete_fact as _df
+        _df(fid)
+        ack = "已忘记：" + fcontent
+      async def _ack_stream2():
+        yield "event: session\ndata: " + json.dumps({"session_id": body.session_id or "memory_cmd"}) + "\n\n"
+        yield "event: stage\ndata: " + json.dumps({"stage": "memory_shortcut", "action": "forget"}) + "\n\n"
+        yield "event: answer\ndata: " + json.dumps({"text": ack}) + "\n\n"
+        yield "event: done\ndata: {}\n\n"
+      return StreamingResponse(_ack_stream2(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
   api_key = (body.api_key or x_api_key or "").strip() or None
   base_url = (body.base_url or "").strip() or None
   emb_key = (body.api_key or x_api_key or "").strip() or None
@@ -478,3 +555,69 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
 
   return StreamingResponse(generate(), media_type="text/event-stream",
                           headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+# Helper called before the LangGraph pipeline. If the user message is a
+# "remember this" or "forget that" command, handle it inline (so it does
+# not get answered as a normal chat question) and yield a synthetic SSE
+# reply.
+import re as _re
+
+_MEM_REMEMBER_PATTERNS = (
+  _re.compile(r"^\s*(?:(?:请|麻烦|please)\s*)?(?:记(?:住|录|下)|remember(?:\s+that)?)\s*[::]?\s*(.+)$", _re.IGNORECASE),
+  _re.compile(r"^\s*/remember\s+(.+)$", _re.IGNORECASE),
+  _re.compile(r"^\s*/记住\s*(.*)$"),
+)
+_MEM_FORGET_PATTERNS = (
+  _re.compile(r"^\s*(?:(?:请|麻烦|please)\s*)?(?:忘(?:记|了)|forget(?:\s+about)?)\s*[::]?\s*(.+)$", _re.IGNORECASE),
+  _re.compile(r"^\s*/forget\s+(.+)$", _re.IGNORECASE),
+  _re.compile(r"^\s*/忘记\s*(.*)$"),
+)
+
+
+def _detect_memory_command(text: str):
+  """Return ("remember" | "forget", content_str) or (None, None)."""
+  if not text:
+    return None, None
+  t = text.strip()
+  for pat in _MEM_REMEMBER_PATTERNS:
+    m = pat.match(t)
+    if m:
+      content = (m.group(1) or "").strip().rstrip("�?!?!?")
+      if content:
+        return "remember", content
+      return "remember", t
+  for pat in _MEM_FORGET_PATTERNS:
+    m = pat.match(t)
+    if m:
+      content = (m.group(1) or "").strip().rstrip("�?!?!?")
+      return "forget", content
+  return None, None
+
+
+def _pick_fact_to_forget(content: str):
+  """Find the best-matching fact for a forget command. Returns (id, content) or (None, None)."""
+  from app.storage.db import list_facts
+  facts = list_facts(limit=200)
+  if not facts:
+    return None, None
+  content_l = (content or "").lower().strip()
+  if not content_l:
+    return None, None
+  # 1) Exact substring match
+  for f in facts:
+    fc = (f.get("content") or "").lower()
+    if content_l == fc or content_l in fc or fc in content_l:
+      return f.get("id"), f.get("content")
+  # 2) Token overlap (>50% of tokens of the query appear in the fact)
+  tokens = [t for t in content_l.split() if len(t) >= 2]
+  if tokens:
+    best = None
+    best_score = 0
+    for f in facts:
+      fc = (f.get("content") or "").lower()
+      hits = sum(1 for t in tokens if t in fc)
+      if hits > best_score:
+        best_score = hits
+        best = f
+    if best and best_score >= max(1, len(tokens) // 2):
+      return best.get("id"), best.get("content")
+  return None, None

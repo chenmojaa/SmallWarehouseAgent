@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { t } from '@/i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent,
@@ -44,7 +45,7 @@ function onGlobalKey(e: KeyboardEvent) {
   const mod = e.metaKey || e.ctrlKey
   if (mod && (e.key === 'k' || e.key === 'K')) {
     e.preventDefault()
-    openPalette()
+    paletteOpen.value = true
     return
   }
   if (e.key === 'Escape' && streamingHere.value) {
@@ -151,10 +152,10 @@ const paletteOpen = ref(false)
               <span v-if="settings.theme === 'dark'" class="theme-icon">☀</span>
               <span v-else class="theme-icon">☾</span>
             </button>
-            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">笔记</n-button></router-link>
-            <n-button quaternary size="small" @click="settingsOpen = true">设置</n-button>
+            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('ui.notes.003', '笔记', '笔记') }}</n-button></router-link>
+            <n-button quaternary size="small" @click="settingsOpen = true">{{ t('nav.settings', '设置', '设置') }}</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
-            <n-button quaternary size="small" @click="handleLogout">退出</n-button>
+            <n-button quaternary size="small" @click="handleLogout">{{ t('nav.logout', '退出', '退出') }}</n-button>
           </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">
