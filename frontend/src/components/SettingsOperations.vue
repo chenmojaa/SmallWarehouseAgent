@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useMessage, NCard, NSpace, NButton, NInput, NSelect, NTag, NEmpty, NSpin, NPopconfirm, NCode, NText } from 'naive-ui'
 import { get, postJson, patchJson, deleteReq } from '@/api/client'
-import { _t } from '@/i18n'
+import { t as _t } from '@/i18n'
 
 const message = useMessage()
 const t = _t
