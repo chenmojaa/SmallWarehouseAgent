@@ -20,7 +20,7 @@ class Settings(BaseSettings):
   embedding_provider: str = "openai"
   embedding_model: str = "text-embedding-3-small"
   embedding_api_key: str = ""
-  embedding_api_base: str = ""
+  embedding_api_base: str = "https://api.minimax.chat/v1"
   embedding_device: str = "cpu"
 
   # ---- Server ----
