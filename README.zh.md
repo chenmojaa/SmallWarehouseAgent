@@ -1,10 +1,10 @@
-<p align="center"><a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>&nbsp;<a href="README.zh.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red.svg" alt="??"></a></p>
+﻿<p align="center"><a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>&nbsp;<a href="README.zh.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red.svg" alt="中文"></a></p>
 
 <div align="center">
 
-# HD — 个人知识库助手
+# Saiwu — 个人知识库智能体
 
-**本地优先的“第二大脑”，把零散的资料变成可检索的知识库，支持表格感知 OCR、多智能体 RAG 和飞书知识库同步。**
+**本地优先的个人知识助手：把散落各处的资料变成可检索、可追问、带引用的知识库。**
 
 </div>
 
@@ -17,33 +17,58 @@
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-ff6f00.svg)](https://www.trychroma.com)
 
-[功能](#功能) · [快速开始](#快速开始) · [架构](#架构) · [文档](docs/FEATURES.md)
+[解决了什么](#解决了什么问题) · [实现了什么功能](#实现了什么功能) · [快速开始](#快速开始) · [架构](#架构)
 
 </div>
 
 ---
 
-## 这是什么？
+## 解决了什么问题
 
-HD 是一个跑在你本机上的个人知识库，配套一个聊天界面——能拿你自己的文档回答问题，每条结论都带 `[1] [2]` 引用，点回去就能看到原文片段。
+**1. 信息散落，找不回来。** 你的资料分散在 PDF、Word、Excel、PPT、网页、图片、飞书文档里——文件名搜索只能匹配标题，藏在内容深处的关键信息只能靠回忆和翻找。
 
-一开始只是个 RAG 演示，后来演化成多智能体系统：
+**2. 通用 AI 不认识你的资料。** 直接问大模型，它不知道你的项目文档、会议纪要、个人笔记；整篇贴过去上下文装不下，多轮追问就丢内容。
 
-- **路由器**先搞清楚你的需求是聊天、多轮研究、入库还是周报
-- 四个**子智能体**分别干活
-- 最后由 LLM 综合答案，带可点击的引用回到原始切片
+**3. 没有出处的回答不敢用。** AI 生成的答案若无引用来源，无法核实真伪，重要决策不敢依赖。
 
-它和别的 RAG 不一样的几个点（一句话版）：
+**4. 中文检索效果差。** 通用向量检索对中文分词、别名不友好，纯关键词检索又受分词质量拖累，搜"牛魔王"可能连"牛魔"都找不到。
 
-- **表格感知解析**——Excel / Word / PPT 的合并单元格完整保留，扫描 PDF 走 OCR + 列聚类还原表格；出来的全是 LLM 能直接读的 Markdown 表格。
-- **混合检索**——Chroma 向量 + SQLite FTS5 BM25（按 `0.7 / 0.3` 加权），中文友好，首请求不会因为 `embo-01` 的怪脸气炸掉。
-- **多智能体 LangGraph**——路由器 -> (研究 | 入库 | 周报)，配 `HD_USE_GRAPH=false` 兑底直调链路。
-- **飞书知识库同步**——文档 + 多维表格拉进同一个 KB，按 `obj_edit_time` 增量更新，没改的页面不重拉。
-- **评测驱动**——`scripts/rag_eval/` 内置金标准集和跑分脚本，出 Recall@K / MRR / 闲聊误引率。调权重、重跑、拍板。
+**5. 隐私顾虑。** 个人资料上传到第三方云端服务心里不踏实——Saiwu 全部数据留在本机（SQLite + Chroma 本地存储），模型 API Key 自己管理。
+
+## 实现了什么功能
+
+针对上述问题，Saiwu 实现了一整套「入库 → 检索 → 问答 → 可信」的闭环：
+
+**1. 全格式入库（11 条解析路径）**
+PDF（文本型 / 扫描件 OCR）、Word、PPT、Excel、CSV、HTML、TXT / MD、图片、URL、飞书 wiki / 多维表格。表格感知解析——合并单元格完整保留，扫描件走 OCR + 列聚类还原表格，输出 LLM 可直接阅读的 Markdown。
+
+**2. 混合检索（中文友好）**
+Chroma 向量（0.7）+ SQLite FTS5 BM25（0.3）双路召回；CJK 两阶段查询（短语匹配 → 单字 OR → LIKE 兜底）；双阈值过滤低质量引用；父块上下文扩展，命中不止是切片。
+
+**3. 多智能体问答（LangGraph 编排）**
+路由器识别意图（聊天 / 研究 / 入库 / 周报）→ 规划器把复杂问题分解为 1-4 个检索子步骤 → 逐步执行 → 材料不足自动补查（最多 3 轮）→ 综合回答。全程 SSE 流式，每一步都看得见。
+
+**4. 计划审批（Human-in-the-loop）**
+开启审批模式后，研究任务先生成计划卡片——可查看、编辑、增删步骤，批准后才执行。人机协同，不是黑盒。
+
+**5. 带引用的可信回答**
+每个结论带 `[1] [2]` 引用，点回去就是原文切片；无引用时明确用自有知识回答，不编造来源。
+
+**6. MCP 工具调用**
+内置 MCP 客户端（stdio），Agent 按需自主发现并调用本地工具（文件读写等），敏感操作弹窗审批。
+
+**7. 飞书知识库同步**
+wiki 文档 + 多维表格拉进同一知识库；按 `obj_edit_time` 增量更新，改过的页面原位重入库，不打断已有引用。
+
+**8. 长期记忆 + 多模型**
+跨会话事实记忆（自动沉淀用户偏好与上下文）；支持 OpenAI / Anthropic / DeepSeek / 智谱 / Kimi / SiliconFlow / Ollama / MiniMax，每请求可切换模型。
+
+**9. 评测驱动**
+内置金标准集与跑分脚本（Recall@K / MRR / 闲聊误引率），调权重、重跑、用数据说话。
 
 ---
 
-## 功能
+## 功能细节
 
 ### 入库 — 11 条路径
 
@@ -74,7 +99,7 @@ HD 是一个跑在你本机上的个人知识库，配套一个聊天界面—�
 ### LLM — 多提供商
 
 - OpenAI、Anthropic（原生）
-- DeepSeek、智谱 GLM、月之清江 Kimi、SiliconFlow、Ollama（OpenAI 兼容 `base_url`）
+- DeepSeek、智谱 GLM、月之暗面 Kimi、SiliconFlow、Ollama（OpenAI 兼容 `base_url`）
 - MiniMax（`embo-01` 等），原生 body + 自动 mode 回退
 - 每请求可覆盖：`base_url` / `api_key` / `model` / `reasoning_level` / `embedding_model`
 
@@ -89,7 +114,7 @@ HD 是一个跑在你本机上的个人知识库，配套一个聊天界面—�
 ### 前端
 
 - Vue 3 + Vite + naive-ui + Pinia
-- HD 蓝主题（`#3b82f6`）
+- Saiwu 蓝主题（`#3b82f6`）
 - SSE 流式响应 + 阶段指示器（intent / research / ingest / report）
 - 引用卡片可点回原文片段
 - `IngestResultCard` 渲染结构化入库元信息（标题 / 标签 / 摘要 / 重复提示）
@@ -123,7 +148,7 @@ flowchart TB
 - Python 3.10+
 - Node.js 18+
 - （可选）Tesseract + `chi_sim.traineddata`，用于 OCR
-- （可选）任一个 OpenAI 兼容接口（OpenAI / Anthropic / DeepSeek / 智谱 / 月之清江 / SiliconFlow / Ollama ...）
+- （可选）任一个 OpenAI 兼容接口（OpenAI / Anthropic / DeepSeek / 智谱 / 月之暗面 / SiliconFlow / Ollama ...）
 
 ### 安装
 

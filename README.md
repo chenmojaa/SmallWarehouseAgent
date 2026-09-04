@@ -1,10 +1,10 @@
-<p align="center"><a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>&nbsp;<a href="README.zh.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red.svg" alt="??"></a></p>
+<p align="center"><a href="README.md"><img src="https://img.shields.io/badge/lang-English-blue.svg" alt="English"></a>&nbsp;<a href="README.zh.md"><img src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-red.svg" alt="中文"></a></p>
 
 <div align="center">
 
-#  Personal Knowledge Base Agent
+# Saiwu — Personal Knowledge Base Agent
 
-**A local-first second brain that turns your messy inbox into a searchable knowledge base, with table-aware OCR, multi-agent RAG, and Feishu wiki sync.**
+**A local-first personal knowledge assistant that turns scattered files into a searchable, follow-up-able knowledge base — with citations.**
 
 </div>
 
@@ -17,31 +17,58 @@
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![Chroma](https://img.shields.io/badge/vector-Chroma-ff6f00.svg)](https://www.trychroma.com)
 
-[Features](#-features) · [Quick Start](#-quick-start) · [Architecture](#-architecture) · [Docs](docs/FEATURES.md)
+[Problems solved](#problems-solved) · [Features](#features) · [Quick Start](#-quick-start) · [Architecture](#-architecture)
 
 </div>
 
 ---
 
-## What is HD?
+## Problems Solved
 
-HD is a personal knowledge base that **lives on your machine**, paired with a chat interface that **answers questions using your own documents** — with citations back to the original source.
+**1. Information is scattered and unrecoverable.** Your files live across PDFs, Word, Excel, PowerPoint, web pages, images, and Feishu docs. Filename search only matches titles — the key facts buried deep inside are found by memory and manual digging.
 
-It started as a RAG demo and grew into a multi-agent system:
+**2. Generic AI doesn't know your documents.** Ask ChatGPT and it has never seen your project docs, meeting notes, or personal files. Paste everything in and the context window overflows, losing content across follow-up turns.
 
-- A **router** decides what you actually want (chat / multi-round research / ingest / weekly report).
-- Four **sub-agents** do the work.
-- An LLM synthesises the answer with `[1] [2]` citations you can click back to the source chunk.
+**3. Answers without sources can't be trusted.** An AI response with no citation can't be verified — you wouldn't base an important decision on it.
 
-The differentiators, in one sentence each:
+**4. Chinese retrieval quality is poor.** Generic vector search handles CJK tokenization and aliases badly; pure keyword search is dragged down by segmentation quality.
 
-- **Table-aware parsing** — Excel / Word / PowerPoint cells with merged rows and columns survive the round-trip; scanned PDFs get OCR plus column-cluster table recovery; everything ends up as Markdown tables the LLM can actually read.
-- **Hybrid retrieval** — Chroma cosine plus SQLite FTS5 BM25 (weighted `0.7 / 0.3`), with CJK-friendly query handling and MiniMax embedding fallback that does not blow up on the first request.
-- **Multi-agent LangGraph** — `router -> (research | ingest | report)` with a `HD_USE_GRAPH=false` legacy switch when things go wrong.
-- **Feishu wiki sync** — ingests wiki docs and bitable records into the same KB; incremental via `obj_edit_time` so changed pages do not re-fetch everything.
-- **Eval-driven** — `scripts/rag_eval/` ships a golden set and a runner that emits Recall@K, MRR, and a smalltalk false-citation rate. Tune weights, rerun, decide.
+**5. Privacy concerns.** Uploading personal material to a third-party cloud service feels wrong — Saiwu keeps all data on your machine (local SQLite + Chroma), and you manage your own API keys.
 
 ## Features
+
+In response, Saiwu implements a closed loop of **ingest → retrieve → answer → trust**:
+
+**1. All-format ingestion (11 parse paths)**
+PDF (text & scanned OCR), Word, PowerPoint, Excel, CSV, HTML, TXT/MD, images, URLs, Feishu wiki/bitable. Table-aware parsing — merged cells survive the round-trip; scanned PDFs get OCR plus column-cluster table recovery; everything becomes Markdown the LLM can read.
+
+**2. Hybrid retrieval (CJK-friendly)**
+Chroma vector (0.7) + SQLite FTS5 BM25 (0.3) dual recall; two-pass CJK queries (phrase match → per-token OR → LIKE fallback); dual thresholds suppress low-quality citations; parent-chunk context expansion — you hit more than a fragment.
+
+**3. Multi-agent Q&A (LangGraph orchestration)**
+A router classifies intent (chat / research / ingest / report) → a planner decomposes complex questions into 1-4 retrieval sub-steps → steps execute one by one → insufficient material triggers follow-up queries (up to 3 rounds) → a final synthesized answer. Fully SSE-streamed — every step is visible.
+
+**4. Plan approval (human-in-the-loop)**
+With approval mode on, research tasks first produce a plan card — review it, edit steps, add or remove, then run. Human-in-the-loop, not a black box.
+
+**5. Trustworthy answers with citations**
+Every conclusion carries `[1] [2]` citations that click back to the source chunk; when there are no references it answers from its own knowledge explicitly — never fabricates sources.
+
+**6. MCP tool calling**
+Built-in MCP client (stdio) — the agent discovers and invokes local tools (file read/write, etc.) as needed; sensitive operations go through an approval modal.
+
+**7. Feishu knowledge sync**
+Wiki docs and bitable records flow into the same KB; incremental via `obj_edit_time` so changed pages re-ingest in place without breaking existing citations.
+
+**8. Long-term memory + multi-provider LLMs**
+Cross-session factual memory (user preferences and context accumulate automatically); supports OpenAI / Anthropic / DeepSeek / Zhipu / Kimi / SiliconFlow / Ollama / MiniMax, switchable per request.
+
+**9. Eval-driven**
+Ships a golden set and eval runner (Recall@K / MRR / smalltalk false-citation rate) — tune weights, rerun, decide with data.
+
+---
+
+## Feature Details
 
 ### Inbox — 11 ingest paths
 
@@ -87,7 +114,7 @@ Tables come out as Markdown blocks, so downstream chunking preserves structure.
 ### Frontend
 
 - Vue 3 + Vite + naive-ui + Pinia
-- HD blue theme (`#3b82f6`)
+- Saiwu blue theme (`#3b82f6`)
 - SSE-driven streaming with stage indicators (intent / research / ingest / report)
 - Citation cards with click-back to source
 - `IngestResultCard` renders structured ingest metadata (title / tags / summary / duplicate warning)
