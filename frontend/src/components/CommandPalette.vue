@@ -38,8 +38,8 @@ const items = computed<CommandItem[]>(() => {
     { id: 'nav.notes', title: '知识库', emoji: '📚', group: '导航', run: () => { void router.push('/notes') } },
     { id: 'nav.skills', title: '技能 / MCP', emoji: '🧩', group: '导航', run: () => { void router.push('/mcp') } },
     // theme
-    { id: 'theme.dark', title: '切换深色主题', emoji: '🌙', group: '外观', run: () => { settings.theme = 'dark'; settings.persist() } },
-    { id: 'theme.light', title: '切换浅色主题', emoji: '☀️', group: '外观', run: () => { settings.theme = 'light'; settings.persist() } },
+    { id: 'theme.dark', title: '切换深色主题', emoji: '🌙', group: '外观', run: () => { settings.setTheme('dark') } },
+    { id: 'theme.light', title: '切换浅色主题', emoji: '☀️', group: '外观', run: () => { settings.setTheme('light') } },
     // rag / planner
     { id: 'toggle.rag', title: chat.useRag ? '关闭 RAG 检索' : '开启 RAG 检索', emoji: '🔍', group: '对话', run: () => chat.toggleRag() },
     { id: 'toggle.planner', title: chat.usePlanner ? '关闭任务规划' : '开启任务规划', emoji: '🧠', group: '对话', run: () => chat.togglePlanner() },
@@ -57,8 +57,7 @@ const items = computed<CommandItem[]>(() => {
       emoji: '💬',
       group: '最近会话',
       keywords: (s.title || '') + ' ' + (s.preview || ''),
-      run: () => { void router.push({ name: 'chat-id', params: { id: s.id } }) },
-    })
+      run: () => { router.push({ name: 'chat-id', params: { id: s.id } }) },    })
   }
   return list
 })

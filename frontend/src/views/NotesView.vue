@@ -443,12 +443,11 @@ function openExternal(url?: string | null) {
             </div>
           <div class="note-actions">
             <span>{{ formatDate(note.created_at) }}</span>
-            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">{{ t('notes.open', '打开', 'Open') }}</button>
-            <button @click="downloadNote(note.id, note.title)">{{ t('ui.misc.005', '下载', '下载') }}</button>
-            <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">{{ t('ui.misc.054', '重建索引', '重建索引') }}</button>
-            <n-popconfirm @positive-click="removeNote(note.id)">
-              <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', 'Delete') }}</button></template>
-              删除该笔记？
+            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">打开</button>
+            <button @click="downloadNote(note.id, note.title)">下载</button>
+            <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">重建索引</button>
+            <n-popconfirm positive-text="确认" negative-text="取消" @positive-click="removeNote(note.id)">
+              <template #trigger><button class="danger">删除</button></template>              删除该笔记？
             </n-popconfirm>
           </div>
         </article>

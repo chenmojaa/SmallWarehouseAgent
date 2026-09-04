@@ -258,6 +258,8 @@ async function doDeleteAccount() {
             <n-button size="small" @click="doExport">{{ t('settings.account.export', '导出我的数据', 'Export my data') }}</n-button>
             <n-popconfirm
               :show-icon="false"
+              positive-text="确认"
+              negative-text="取消"
               @positive-click="deleteOpen = true"
             >
               <template #trigger>
@@ -312,7 +314,7 @@ async function doDeleteAccount() {
         </div>
 
         <!-- ============ Knowledge / Feishu ============ -->
-        <div v-if="section === 'knowledge'" class="section">
+        <div v-if="section === 'knowledge'" class="section knowledge-section">
           <n-spin :show="feishuLoading">
             <div class="form-row">
               <label>Web URL</label>
@@ -388,8 +390,9 @@ async function doDeleteAccount() {
 .drawer-card {
   background: var(--bg-elevated);
   width: min(680px, 96vw);
-  max-height: 86vh;
-  margin: 7vh auto;
+  /* 固定高度：切换 tab 时弹窗尺寸保持一致，内容在 body 内滚动 */
+  height: min(720px, 82vh);
+  margin: 9vh auto;
   border-radius: 14px;
   display: flex;
   flex-direction: column;
@@ -398,16 +401,21 @@ async function doDeleteAccount() {
 }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
 .drawer-head h3 { margin: 0; font-size: 16px; }
-.close-btn { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: 18px; border-radius: 6px; color: var(--text-secondary); }
+.close-btn { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: 18px; border-radius: 999px; color: var(--text-secondary); }
 .close-btn:hover { background: var(--hover-bg); }
-.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }
-.drawer-tab { padding: 6px 12px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); justify-content: flex-end; }
+.drawer-tab { padding: 6px 12px; border: 0; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 .drawer-tab:hover { background: var(--hover-bg); }
 .drawer-tab.active { background: rgba(59,130,246,0.18); color: var(--text-primary); }
 .drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
 .section { display: flex; flex-direction: column; gap: 12px; }
 .form-row { display: flex; flex-direction: column; gap: 6px; }
 .form-row label { font-size: 12px; color: var(--text-secondary); }
+/* 知识库配置：表单行间距放宽，按钮组与输入框拉开距离 */
+.knowledge-section .n-spin-content { display: flex; flex-direction: column; gap: 26px; }
+.knowledge-section .form-row { gap: 10px; }
+.knowledge-section .actions { margin-top: 8px; gap: 14px; }
+.knowledge-section .status-ok, .knowledge-section .spaces { margin: 0; }
 .profile-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--border-soft); }
 .key-label { color: var(--text-secondary); font-size: 13px; }
 .val { font-size: 13px; color: var(--text-primary); }
@@ -422,7 +430,7 @@ async function doDeleteAccount() {
 .hr { height: 1px; background: var(--border-soft); margin: 8px 0; }
 .status-ok { color: var(--success-color, #22c55e); font-size: 12px; }
 .spaces { display: flex; gap: 4px; flex-wrap: wrap; }
-.lang-toggle { display: inline-flex; gap: 4px; padding: 2px; border: 1px solid var(--border-soft); border-radius: 8px; }
-.lang-btn { padding: 4px 12px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.lang-toggle { display: inline-flex; gap: 4px; padding: 2px; border: 1px solid var(--border-soft); border-radius: 999px; }
+.lang-btn { padding: 4px 12px; border: 0; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 .lang-btn.active { background: rgba(59,130,246,0.18); color: var(--text-primary); }
 </style>

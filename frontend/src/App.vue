@@ -8,6 +8,7 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '@/stores/settings'
 import { useSessionsStore } from '@/stores/sessions'
+import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
@@ -17,42 +18,14 @@ import CommandPalette from '@/components/CommandPalette.vue'
 import { open as openPalette } from '@/composables/useCommandPalette'
 import { sidebarDrawerOpen, toggleSidebarDrawer, closeSidebarDrawer } from '@/composables/useMobileDrawer'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
+import { t } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const chat = useChatStore()
-
-const isLoginPage = computed(() => route.name === 'login')
-
-const BRAND_BLUE = '#3b82f6'
-const naiveOverrides = computed(() => ({
-  common: {
-    primaryColor: BRAND_BLUE,
-    primaryColorHover: '#60a5fa',
-    primaryColorPressed: '#2563eb',
-    primaryColorSuppl: BRAND_BLUE,
-    infoColor: BRAND_BLUE,
-    infoColorHover: '#60a5fa',
-    infoColorPressed: '#2563eb',
-    successColor: BRAND_BLUE,
-    successColorHover: '#60a5fa',
-    successColorPressed: '#2563eb',
-  },
-}))
-
-
-
-function onGlobalKey(e: KeyboardEvent) {
-  const mod = e.metaKey || e.ctrlKey
-  if (mod && (e.key === 'k' || e.key === 'K')) {
-    e.preventDefault()
-    paletteOpen.value = true
-    return
-  }
-  if (e.key === 'Escape' && chat.streamingHere) {
-    chat.abortStream?.()
-  }
+  if (e.key === 'Escape' && streamingHere.value) {
+    chat.abortCtl?.abort()  }
 }
 window.addEventListener('keydown', onGlobalKey)
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))
@@ -128,7 +101,7 @@ const paletteOpen = ref(false)
           <n-space align="center">
             <button
               class="sider-toggle"
-              :title="siderCollapsed ? '展开侧边栏' : '收起侧边栏'"
+              :title="siderCollapsed ? t('app.header.expandSider', '展开侧边栏', 'Expand sidebar') : t('app.header.collapseSider', '收起侧边栏', 'Collapse sidebar')"
               @click="toggleSider"
             >
               <svg v-if="siderCollapsed" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -148,17 +121,16 @@ const paletteOpen = ref(false)
           <n-space align="center" :wrap="false">
             <button
               class="theme-toggle"
-              :title="settings.theme === 'dark' ? '切换到白昼' : '切换到黑夜'"
+              :title="settings.theme === 'dark' ? t('app.header.lightTheme', '切换到白昼', 'Switch to light') : t('app.header.darkTheme', '切换到黑夜', 'Switch to dark')"
               @click="toggleTheme"
             >
               <span v-if="settings.theme === 'dark'" class="theme-icon">☀</span>
               <span v-else class="theme-icon">☾</span>
             </button>
-            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('ui.notes.003', '笔记', '笔记') }}</n-button></router-link>
-            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">{{ t('nav.settings', '设置', 'Settings') }}</n-button>
+            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('app.header.notes', '笔记', 'Notes') }}</n-button></router-link>
+            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">{{ t('app.header.settings', '设置', 'Settings') }}</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
-            <n-button quaternary size="small" @click="handleLogout">{{ t('nav.logout', '退出', 'Logout') }}</n-button>
-          </n-space>
+            <n-button quaternary size="small" @click="handleLogout">{{ t('app.header.logout', '退出', 'Logout') }}</n-button>          </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">
           <n-layout-sider v-if="!siderCollapsed" bordered :width="260" :native-scrollbar="false" content-style="padding: 0;" class="desktop-sider">

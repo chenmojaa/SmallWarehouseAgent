@@ -151,23 +151,36 @@ app.include_router(mcp_router, prefix='/api')
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if _FRONTEND_DIST.is_dir():
   from fastapi.staticfiles import StaticFiles
-  app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")
-  # Favicon & other root-level static files
+  from fastapi.responses import FileResponse
+
+  # Serve root-level static files (favicon.png, logo.png, etc.)
   for _f in _FRONTEND_DIST.glob("*"):
     if _f.is_file():
       _name = _f.name
-      app.mount(f"/{_name}", StaticFiles(directory=str(_FRONTEND_DIST)), name=f"static_{_name}")
+      _file = _f  # capture current file in closure
 
-  @app.get("/{_:path}")
+      @app.get(f"/{_name}", include_in_schema=False)
+      async def _serve_static_file(_file=_file):
+        return FileResponse(_file)
+
+  # Serve assets directory
+  app.mount("/assets", StaticFiles(directory=_FRONTEND_DIST / "assets"), name="assets")
+
+  def _index_response() -> FileResponse:
+    """index.html 禁止缓存：文件名带 hash 的 assets 可长缓存，但 index.html 必须每次
+    重新验证，否则浏览器会一直引用构建前的旧 JS/CSS 文件名。"""
+    resp = FileResponse(_FRONTEND_DIST / "index.html")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+  @app.get("/{_:path}", include_in_schema=False)
   async def _spa_fallback(_: str):
     """Serve index.html for SPA client-side routing. Non-API GET requests fall here."""
-    from fastapi.responses import FileResponse
-    return FileResponse(_FRONTEND_DIST / "index.html")
+    return _index_response()
 
-  @app.get("/")
+  @app.get("/", include_in_schema=False)
   async def _root():
-    from fastapi.responses import FileResponse
-    return FileResponse(_FRONTEND_DIST / "index.html")
+    return _index_response()
 
   logger.info(f"Frontend static files mounted from {_FRONTEND_DIST}")
 

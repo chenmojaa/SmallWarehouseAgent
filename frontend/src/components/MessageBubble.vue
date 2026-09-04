@@ -98,11 +98,19 @@ const sourceTokens = computed(() => sourceLine.value.tokens)
 // Guards against two failure modes: (1) LLM hallucinating [N] with no
 // retrieved chunks (citations = []) and (2) LLM citing an index out of
 // range. Either way, dangling [N] buttons render as broken UI.
+//
+// When the LLM did NOT write an explicit "来源：[n]" line but citations
+// exist (backend extracted them from inline [n] markers or from the
+// retrieved chunks), fall back to showing ALL citation indices so the
+// source footer is always visible when references are available.
 const validSourceTokens = computed<number[]>(() => {
   const cites = props.citations
   if (!cites || cites.length === 0) return []
   const max = cites.length
-  return sourceTokens.value.filter(n => n >= 1 && n <= max)
+  if (sourceTokens.value.length > 0) {
+    return sourceTokens.value.filter(n => n >= 1 && n <= max)
+  }
+  return Array.from({ length: max }, (_, i) => i + 1)
 })
 
 // 3) Replace inline [n] markers with clickable citation buttons so the

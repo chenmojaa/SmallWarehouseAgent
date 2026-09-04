@@ -275,4 +275,21 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
       yield ("error", "%s: %s" % (type(e).__name__, e))
       return
 
-  yield ("done", {"answer": full_text, "citations": _citations_from_text(full_text, chunks)})
+  citations = _citations_from_text(full_text, chunks)
+  # Fallback: if the LLM did not write any [n] markers in the answer,
+  # expose ALL retrieved chunks as citations so the frontend can still
+  # show the source footer (the user can see where the info came from).
+  if not citations and chunks:
+    citations = [
+      {
+        "note_id": c.get("note_id"),
+        "title": c.get("title"),
+        "chunk_index": c.get("chunk_index"),
+        "snippet": (c.get("text") or "")[:240],
+        "score": c.get("final_score"),
+        "source_type": c.get("source_type", ""),
+        "source_url": c.get("source_url", ""),
+      }
+      for c in chunks
+    ]
+  yield ("done", {"answer": full_text, "citations": citations})

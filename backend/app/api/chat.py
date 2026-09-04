@@ -82,12 +82,19 @@ class ChatRequest(BaseModel):
   embedding_base_url: str | None = None
   agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
   use_planner: bool | None = None     # None=跟随服务端 HD_PLANNER_ENABLED；true/false=本轮强制开/关
+  plan_override: PlanOverride | None = None  # HITL 计划审批：已批准的计划（阶段 2 传入）
   subagent: str | None = None         # Optional sub-agent profile (explore|plan|general) to dispatch in parallel with the main answer.
 
 
 class PermissionDecision(BaseModel):
   request_id: str
   approve: bool
+
+
+class PlanOverride(BaseModel):
+  """HITL 计划审批：用户批准/编辑后的计划，planner 直接采用（跳过 LLM 规划）。"""
+  summary: str = ""
+  steps: list[str] = []
 
 
 def _extract_query(messages):
@@ -101,10 +108,12 @@ def _sse(event: str, payload) -> str:
   return "event: " + event + chr(10) + "data: " + json.dumps(payload, ensure_ascii=False) + chr(10) + chr(10)
 
 
-def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply: str) -> None:
+def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply: str,
+                              api_key: str | None = None) -> None:
   """本轮对话结束后后台抽取用户事实（长期记忆）。不抛错、不阻塞 SSE。
 
   用 to_thread 跑同步 LLM 调用，避免阻塞事件循环；fire-and-forget。
+  api_key 必须从当前请求透传：.env 不配 LLM_API_KEY 时凭证只存在于请求里。
   """
   import asyncio
   from app.agent.memory import extract_facts
@@ -115,7 +124,7 @@ def _schedule_fact_extraction(session_id: str, user_query: str, assistant_reply:
   ]
   try:
     asyncio.get_running_loop().create_task(
-      asyncio.to_thread(extract_facts, history, session_id)
+      asyncio.to_thread(extract_facts, history, session_id, api_key)
     )
   except RuntimeError:
     pass  # 无事件循环（理论不可达）：跳过，下一轮再抽
@@ -157,7 +166,9 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   project_rules = ""
   try:
     from app.agent.agents_md import project_rules as _pr
-    project_rules = _pr()
+    rules = _pr()
+    # project_rules() 返回 RuleSet 对象（.text 为合并文本）；兼容旧版返回 str
+    project_rules = rules.text if hasattr(rules, "text") else (rules or "")
   except Exception as e:
     _log.debug("agents_md load failed (ignored): %s", e)
 
@@ -166,7 +177,7 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
   summary = ""
   if len(history) > 12:
     try:
-      summary = summarize_overflow(history)
+      summary = summarize_overflow(history, api_key=api_key)
     except Exception:
       summary = ""
 
@@ -204,11 +215,15 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "answer": None,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
-    "use_planner": (
-      body.use_planner
-      if body.use_planner is not None
-      else _auto_plan_triggered(query)
-    ),
+    "use_planner": body.use_planner,
+    # HITL 计划审批：每轮显式重置（checkpointer 泄露防护）；
+    # 有已批准计划时规范化后注入，planner 检测到即跳过 LLM 规划。
+    "plan_override": (
+        {
+            "summary": (body.plan_override.summary or "").strip(),
+            "steps": [str(s).strip() for s in body.plan_override.steps if str(s).strip()],
+        }
+        if (body.plan_override and body.plan_override.steps) else None    ),
     "subagent_mode": body.subagent,
   }
 
@@ -219,6 +234,71 @@ async def resolve_permission(body: PermissionDecision):
   from app.agent.tools import permissions as _perm
   ok = _perm.resolve(body.request_id, body.approve)
   return {"ok": ok}
+
+
+@router.post("/chat/plan-preview")
+def plan_preview(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-API-Key")):
+  """HITL 计划审批阶段 1：只跑 router + planner 生成计划草案，等待用户批准。
+
+  只读端点：不写 DB、不建 session、不触碰 MCP 全局状态——
+  用户取消审批时这一轮对话不留任何痕迹；批准后阶段 2 走正常 /chat 流程。
+  """
+  if not settings.use_graph:
+    return {"needs_plan": False, "intent": "chat", "plan_summary": "", "steps": []}
+  if not body.messages:
+    raise HTTPException(status_code=400, detail="messages is empty")
+
+  query = _extract_query(body.messages)
+  if not query:
+    raise HTTPException(status_code=400, detail="no user message content")
+
+  api_key = (body.api_key or x_api_key or "").strip() or None
+  base_url = (body.base_url or "").strip() or None
+
+  from app.agent.nodes.router import router_node
+  from app.agent.nodes.planner import planner_node
+
+  history = get_messages(body.session_id, limit=16) if body.session_id else []
+  state = {
+    "messages": [*history, {"role": "user", "content": query}],
+    "query": query,
+    "intent": "",
+    "rewritten_query": "",
+    "provider_override": body.provider,
+    "model_override": body.model,
+    "base_url_override": base_url,
+    "api_key_override": api_key,
+    "reasoning_level_override": body.reasoning_level,
+    "step_count": 0,
+    "use_planner": True,
+  }
+  try:
+    routed = router_node(state)
+    state.update(routed)
+  except Exception as e:
+    _log.warning("plan-preview: router failed: %s", e)
+    return {"needs_plan": False, "intent": "chat", "plan_summary": "", "steps": []}
+
+  intent = (routed.get("intent") or "chat").lower()
+  if intent != "research":
+    return {"needs_plan": False, "intent": intent, "plan_summary": "", "steps": []}
+
+  try:
+    planned = planner_node(state)
+    state.update(planned)
+  except Exception as e:
+    _log.warning("plan-preview: planner failed: %s", e)
+    planned = {}
+
+  plan = planned.get("plan") or []
+  steps = [str(s.get("query") or "").strip() for s in plan if isinstance(s, dict)]
+  steps = [s for s in steps if s]
+  return {
+    "needs_plan": bool(steps),
+    "intent": intent,
+    "plan_summary": planned.get("plan_summary") or "",
+    "steps": steps,
+  }
 
 
 @router.post("/chat")
@@ -484,7 +564,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
         except Exception:
           pass
         # 长期记忆：本轮结束后后台抽取用户事实（不阻塞 SSE 响应）
-        _schedule_fact_extraction(session_id, query, "".join(text_parts))
+        _schedule_fact_extraction(session_id, query, "".join(text_parts), api_key)
       return
 
     # ---- Legacy path (HD_USE_GRAPH=false) ----

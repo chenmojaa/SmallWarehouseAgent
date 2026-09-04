@@ -292,10 +292,9 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
                 <button type="button" class="expand-toggle" @click="toggleSkillDetail(skill)">
                   {{ expandedSkillId === skill.id ? '收起 ▴' : '展开 ▾' }}
                 </button>
-                <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">{{ t('ui.misc.039', '来源', '来源') }}</a>
-                <n-popconfirm @positive-click="removeSkill(skill.id)">
-                  <template #trigger><button type="button">{{ t('chat.msg.delete', '删除', 'Delete') }}</button></template>
-                  删除该技能？
+                <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">来源</a>
+                <n-popconfirm positive-text="确认" negative-text="取消" @positive-click="removeSkill(skill.id)">
+                  <template #trigger><button type="button">删除</button></template>                  删除该技能？
                 </n-popconfirm>
               </div>
             </div>

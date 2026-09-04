@@ -161,6 +161,10 @@ def router_node(state: AgentState) -> dict:
 
 def route_by_intent(state: AgentState) -> str:
     """Conditional edge dispatcher. Used by LangGraph after the router."""
+    # HITL 计划审批：阶段 1 已判定 research 且用户已批准计划，
+    # 阶段 2 无条件走 research（router 重跑抖动 / Plan 开关状态不影响执行）。
+    if state.get("plan_override"):
+        return "research"
     intent = (state.get("intent") or "chat").lower()
     # Plan Mode (Codex CLI / Claude Code parity): if the user toggled it on,
     # escalate chat-classified queries so the planner still gets a chance to

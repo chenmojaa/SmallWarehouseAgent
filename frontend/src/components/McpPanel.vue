@@ -266,10 +266,9 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
             </div>
             <div class='server-actions'>
               <n-switch :value='server.enabled' size='small' @update:value='(v) => toggleServer(server, v)' @click.stop />
-              <n-button size='small' quaternary :loading='testingId === server.id' @click.stop='testServer(server)'>{{ t('ui.misc.045', '测试', '测试') }}</n-button>
-              <n-button size='small' quaternary @click.stop='openEdit(server)'>{{ t('ui.misc.050', '编辑', '编辑') }}</n-button>
-              <n-popconfirm @positive-click='removeServer(server)'>
-                <template #trigger>
+              <n-button size='small' quaternary :loading='testingId === server.id' @click.stop='testServer(server)'>测试</n-button>
+              <n-button size='small' quaternary @click.stop='openEdit(server)'>编辑</n-button>
+              <n-popconfirm positive-text="确认" negative-text="取消" @positive-click='removeServer(server)'>                <template #trigger>
                   <n-button size='small' quaternary type='error' @click.stop>{{ t('chat.msg.delete', '删除', 'Delete') }}</n-button>
                 </template>
                 确定删除「{{ server.name }}」？
