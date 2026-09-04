@@ -55,21 +55,27 @@ def _hash_password(password: str, salt: str) -> str:
 
 
 # ---- Token ----
-def make_token(user_id: int) -> str:
-    payload = f"{user_id}.{int(time.time()) + TOKEN_TTL_SECONDS}"
+def make_token(user_id: int, token_version: int = 0) -> str:
+    payload = f"{user_id}.{token_version}.{int(time.time()) + TOKEN_TTL_SECONDS}"
     sig = hmac.new(_get_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}.{sig}"
 
 
 def verify_token(token: str) -> Optional[int]:
-    """Return user_id if the token is valid, not expired, and not revoked. Else None."""
+    """Return user_id if the token is valid, not expired, and not revoked.
+
+    Tokens are ``f"{user_id}.{token_version}.{exp}.{sig}"``. We compare the
+    embedded ``token_version`` against the current ``User.token_version`` and
+    reject mismatches, so a password change invalidates every other active
+    session for the same account.
+    """
     if not token:
         return None
     parts = token.split(".")
-    if len(parts) != 3:
+    if len(parts) != 4:
         return None
-    user_id_s, exp_s, sig = parts
-    payload = f"{user_id_s}.{exp_s}"
+    user_id_s, tok_version_s, exp_s, sig = parts
+    payload = f"{user_id_s}.{tok_version_s}.{exp_s}"
     expected = hmac.new(_get_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
@@ -77,7 +83,17 @@ def verify_token(token: str) -> Optional[int]:
         if int(exp_s) < time.time():
             return None
         user_id = int(user_id_s)
+        tok_version = int(tok_version_s)
     except ValueError:
+        return None
+    # Reject tokens whose embedded token_version is stale (password changed
+    # since issue). Fail-closed if the DB is unreachable.
+    try:
+        with get_session() as s:
+            user = s.get(User, user_id)
+            if user is None or getattr(user, "token_version", 0) != tok_version:
+                return None
+    except Exception:
         return None
     # New: explicit revocation check. Fail-closed if the blacklist table is
     # unreachable so a stolen token cannot slip through during a DB outage.
@@ -163,7 +179,7 @@ def register(req: RegisterReq, request: Request):
         session.add(user)
         session.commit()
         session.refresh(user)
-        return {"ok": True, "user_id": user.id, "phone": user.phone, "token": make_token(user.id)}
+        return {"ok": True, "user_id": user.id, "phone": user.phone, "token": make_token(user.id, getattr(user, 'token_version', 0))}
 
 
 @router.post("/login")
@@ -183,7 +199,7 @@ def login(req: LoginReq, request: Request):
             raise HTTPException(status_code=401, detail="账号不存在，请先注册")
         if not hmac.compare_digest(user.password_hash, _hash_password(password, user.password_salt)):
             raise HTTPException(status_code=401, detail="密码错误")
-        return {"ok": True, "user_id": user.id, "phone": user.phone, "token": make_token(user.id)}
+        return {"ok": True, "user_id": user.id, "phone": user.phone, "token": make_token(user.id, getattr(user, 'token_version', 0))}
 
 
 @router.post("/logout")
@@ -230,6 +246,12 @@ def change_password(req: ChangePasswordReq, request: Request):
         salt = secrets.token_hex(16)
         user.password_salt = salt
         user.password_hash = _hash_password(new_password, salt)
+        user.token_version = (getattr(user, 'token_version', 0) or 0) + 1
+        # Bumping token_version invalidates every other active session for
+        # this account immediately (verify_token rejects mismatched versions).
+        # The current request still holds the old token; we revoke it below
+        # so the user is forced to log in with the new credentials.
+        user.token_version = (getattr(user, "token_version", 0) or 0) + 1
         user.updated_at = datetime.now(timezone.utc)
         session.add(user)
         session.commit()

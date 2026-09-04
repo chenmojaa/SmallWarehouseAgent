@@ -75,6 +75,7 @@ class User(SQLModel, table=True):
   phone: str = Field(unique=True, index=True)
   password_salt: str
   password_hash: str
+  token_version: int = Field(default=0)
   created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
   updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -93,6 +94,7 @@ def get_engine():
     SQLModel.metadata.create_all(_engine)
     _init_fts(_engine)
     _migrate_notes(_engine)
+    _migrate_token_version(_engine)
   return _engine
 
 
@@ -612,6 +614,8 @@ def recall_facts(query: str, limit: int = 8) -> list[str]:
   out = (relevant[:limit] + recent[:half])[:limit]
   return out
 # === MCP call history (cross-session visibility) ===
+
+
 class MCPCallLog(SQLModel, table=True):
   __tablename__ = "mcp_call_log"
   id: Optional[int] = Field(default=None, primary_key=True)

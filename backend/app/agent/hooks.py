@@ -180,7 +180,9 @@ def _run_one(spec: HookSpec, event: dict) -> HookRunResult:
             input=json.dumps({"event": event, "phase": spec.phase, "tool": event.get("tool")}, ensure_ascii=False),
             capture_output=True,
             text=True,
-            timeout=max(0.5, spec.timeout_s),
+            # Bounded hook execution: floor 0.5s, ceiling 30s. A
+            # misconfigured /user/ hook must never wedge the agent.
+            timeout=max(0.5, min(30.0, spec.timeout_s)),
         )
         result.duration_ms = int((time.monotonic() - started) * 1000)
         result.stdout = (proc.stdout or "").strip()

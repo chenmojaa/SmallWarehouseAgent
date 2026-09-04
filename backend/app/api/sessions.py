@@ -1,4 +1,4 @@
-﻿"""Chat session REST API."""
+"""Chat session REST API."""
 from __future__ import annotations
 
 from typing import Optional
@@ -27,7 +27,7 @@ class ForkRequest(BaseModel):
 
 
 @router.get("/sessions")
-async def api_list_sessions(limit: int = 100):
+async def api_list_sessions(limit: int = Query(50, ge=1, le=200, description="1..200")):
   return {"items": list_sessions(limit=limit)}
 
 

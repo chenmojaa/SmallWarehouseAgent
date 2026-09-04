@@ -236,7 +236,7 @@ async def api_ingest_file(
   return _to_dict(note)
 
 @router.get("/notes")
-async def api_list_notes(limit: int = 50, offset: int = 0):
+async def api_list_notes(limit: int = Query(50, ge=1, le=500, description="1..500"), offset: int = 0):
   with get_session() as s:
     stmt = select(Note).order_by(Note.created_at.desc()).offset(offset).limit(limit)
     notes = s.exec(stmt).all()
