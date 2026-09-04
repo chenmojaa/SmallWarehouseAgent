@@ -80,6 +80,7 @@ interface State {
   agentPermission: 'default' | 'full'
   // 当前待用户批准的权限请求（弹窗数据）
   pendingPermission: PendingPermission | null
+  _torn: boolean
 }
 
 export const useChatStore = defineStore("chat", {
@@ -106,6 +107,7 @@ export const useChatStore = defineStore("chat", {
       try { return localStorage.getItem('agent-permission') === 'full' ? 'full' : 'default' } catch { return 'default' }
     })(),
     pendingPermission: null,
+    _torn: false,
   }),
   getters: {
     streamingHere: (s): boolean => s.isStreaming && s.streamingSessionId !== null && s.streamingSessionId === s.sessionId,
@@ -113,6 +115,7 @@ export const useChatStore = defineStore("chat", {
   actions: {
     toggleRag() { this.useRag = !this.useRag },
     abortStream() {
+      this._torn = true
       this.abortCtl?.abort()
       this.abortCtl = null
     },
@@ -362,6 +365,7 @@ export const useChatStore = defineStore("chat", {
       this.streamingMessageId = asstMsg.id
       this.error = null
       this.stage = null
+      this._torn = false
       this.abortCtl = new AbortController()
 
       const payload = this._buildPayload(text)
@@ -416,6 +420,7 @@ export const useChatStore = defineStore("chat", {
       this.streamingMessageId = msgId
       this.error = null
       this.stage = null
+      this._torn = false
       this.abortCtl = new AbortController()
 
       const payload = this._buildPayload(prev.content, {

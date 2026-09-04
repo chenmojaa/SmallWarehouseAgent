@@ -15,6 +15,7 @@ We intentionally do NOT execute skill scripts inside the agent loop unless the
 user explicitly asks for it (that becomes a separate explicit endpoint).
 """
 from __future__ import annotations
+import re
 
 import logging
 from pathlib import Path
