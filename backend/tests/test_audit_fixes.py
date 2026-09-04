@@ -357,3 +357,83 @@ class TestRetrievalQualityPerRequest(unittest.TestCase):
         for kind, ak, bu in seen:
             self.assertEqual(ak, "sk-h", f"{kind} did not get api_key")
             self.assertEqual(bu, "https://h.example/v1", f"{kind} did not get base_url")
+
+class TestMigrateTokenVersion(unittest.TestCase):
+    """get_engine() must define an idempotent _migrate_token_version helper.
+
+    The helper is invoked in db.get_engine() before any SELECT hits the users
+    table. If the function is missing, the call site raises NameError and the
+    very next /api/auth/login returns "no such column: users.token_version"
+    (HTTP 500). This regression test pins the contract so a future refactor
+    cannot silently drop the function again.
+    """
+
+    def test_migrate_token_version_is_defined(self):
+        from app.storage import db
+        self.assertTrue(callable(getattr(db, "_migrate_token_version", None)),
+                        "_migrate_token_version must be defined in app.storage.db")
+
+    def test_migrate_token_version_adds_column_to_legacy_users_table(self):
+        """A legacy users table without token_version gets the column added."""
+        import sqlite3
+        import tempfile
+        from app.storage import db
+        from sqlalchemy import create_engine
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            # Schema mirrors what an old install looked like: NO token_version.
+            conn.execute(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, phone VARCHAR, "
+                "password_salt VARCHAR, password_hash VARCHAR, "
+                "created_at DATETIME, updated_at DATETIME)"
+            )
+            conn.execute(
+                "INSERT INTO users (phone, password_salt, password_hash) "
+                "VALUES ('x', 's', 'h')",
+            )
+            conn.commit()
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            self.assertNotIn("token_version", cols, "precondition: legacy schema")
+
+            eng = create_engine(f"sqlite:///{tmp_path}")
+            db._migrate_token_version(eng)
+
+            cols_after = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+            self.assertIn("token_version", cols_after)
+            # Existing rows must default to 0 so old logins are not invalidated.
+            row = conn.execute("SELECT token_version FROM users").fetchone()
+            self.assertEqual(row[0], 0)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def test_migrate_token_version_is_idempotent(self):
+        """Calling twice on a column that already exists must not raise."""
+        import sqlite3
+        import tempfile
+        from app.storage import db
+        from sqlalchemy import create_engine
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            conn = sqlite3.connect(tmp_path)
+            conn.execute(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, phone VARCHAR, "
+                "password_salt VARCHAR, password_hash VARCHAR, "
+                "created_at DATETIME, updated_at DATETIME, "
+                "token_version INTEGER NOT NULL DEFAULT 0)"
+            )
+            conn.commit()
+            eng = create_engine(f"sqlite:///{tmp_path}")
+            # Must NOT raise "duplicate column" on the second call.
+            db._migrate_token_version(eng)
+            db._migrate_token_version(eng)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass

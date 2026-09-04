@@ -131,6 +131,26 @@ def _migrate_notes(engine):
         if "duplicate column" not in msg and "already exists" not in msg:
           raise
 
+def _migrate_token_version(engine):
+  """Idempotent column add for users.token_version.
+
+  The User model has carried ``token_version`` since the password-
+  rotation fix, but get_engine() calls this before any SELECT hits the
+  users table, so a missing function (or a missing column on an old DB)
+  surfaced as 500 "no such column: users.token_version" on /api/auth/
+  login. ALTER TABLE ADD COLUMN ... DEFAULT 0 is safe to re-run: the
+  "duplicate column" / "already exists" path is swallowed the same way
+  as _migrate_notes above.
+  """
+  statement = "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+  with engine.begin() as conn:
+    try:
+      conn.execute(text(statement))
+    except Exception as e:
+      msg = str(e).lower()
+      if "duplicate column" not in msg and "already exists" not in msg:
+        raise
+
 
 def get_session() -> Session:
   return Session(get_engine())
