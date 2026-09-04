@@ -267,7 +267,7 @@ function openExternal(url?: string | null) {
     <header class="page-hero">
       <div>
         <span class="eyebrow">KNOWLEDGE BASE</span>
-        <h1>{{ t('nav.notes', '知识库', '知识库') }}</h1>
+        <h1>{{ t('nav.notes', '知识库', 'Knowledge Base') }}</h1>
         <p>{{ t('ui.sync.004', '集中管理本地文件、网页、文本，以及飞书文档和多维表格。', '集中管理本地文件、网页、文本，以及飞书文档和多维表格。') }}</p>
       </div>
       <n-button secondary :loading="refreshingSources" @click="loadFeishuData">{{ t('ui.misc.012', '刷新状态', '刷新状态') }}</n-button>
@@ -313,18 +313,18 @@ function openExternal(url?: string | null) {
         <div v-if="notes.uploadProgress" class="progress-note" :class="notes.uploadProgress.status">
           <n-spin v-if="notes.uploadProgress.status === 'uploading'" size="small" />
           <span>{{ notes.uploadProgress.name }} {{ notes.uploadProgress.status === 'uploading' ? '处理中' : notes.uploadProgress.status === 'done' ? '完成' : notes.uploadProgress.status === 'canceled' ? '已取消' : notes.uploadProgress.message }}</span>
-          <button v-if="notes.uploadProgress.status === 'uploading'" class="cancel-btn" @click="notes.cancelUpload()">{{ t('chat.perm.confirm.cancel', '取消', '取消') }}</button>
+          <button v-if="notes.uploadProgress.status === 'uploading'" class="cancel-btn" @click="notes.cancelUpload()">{{ t('chat.perm.confirm.cancel', '取消', 'Cancel') }}</button>
         </div>
       </div>
 
       <div v-else-if="tab === 'url'" class="inline-form">
-        <n-input v-model:value="urlInput" placeholder="t('ui.notes.004', '粘贴文章链接', '粘贴文章链接')" size="large" @keyup.enter="addUrl" />
+        <n-input v-model:value="urlInput" :placeholder="t('ui.notes.004', '粘贴文章链接', '粘贴文章链接')" size="large" @keyup.enter="addUrl" />
         <n-button type="primary" size="large" :loading="notes.ingesting" @click="addUrl">{{ t('ui.notes.002', '抓取入库', '抓取入库') }}</n-button>
       </div>
 
       <div v-else class="stack-form">
-        <n-input v-model:value="textTitle" placeholder="t('ui.misc.043', '标题（可选）', '标题（可选）')" />
-        <n-input v-model:value="textInput" type="textarea" :autosize="{ minRows: 5, maxRows: 12 }" placeholder="t('ui.notes.005', '粘贴需要保存的文本…', '粘贴需要保存的文本…')" />
+        <n-input v-model:value="textTitle" :placeholder="t('ui.misc.043', '标题（可选）', '标题（可选）')" />
+        <n-input v-model:value="textInput" type="textarea" :autosize="{ minRows: 5, maxRows: 12 }" :placeholder="t('ui.notes.005', '粘贴需要保存的文本…', '粘贴需要保存的文本…')" />
         <n-button type="primary" :loading="notes.ingesting" @click="addText">{{ t('ui.notes.001', '保存并入库', '保存并入库') }}</n-button>
       </div>
     </n-card>
@@ -335,7 +335,7 @@ function openExternal(url?: string | null) {
           {{ filter.label }}
         </button>
       </div>
-      <n-input v-model:value="keyword" placeholder="t('ui.misc.033', '搜索标题或摘要', '搜索标题或摘要')" clearable size="large" />
+      <n-input v-model:value="keyword" :placeholder="t('ui.misc.033', '搜索标题或摘要', '搜索标题或摘要')" clearable size="large" />
     </div>
 
     <n-card v-if="showFeishu" class="panel-card feishu-panel" :bordered="false">
@@ -359,7 +359,7 @@ function openExternal(url?: string | null) {
       </template>
 
       <div v-if="!feishuStatus?.enabled" class="empty-surface">
-        <n-empty description="t('ui.sync.001', '当前尚未启用飞书同步', '当前尚未启用飞书同步')" />
+        <n-empty :description="t('ui.sync.001', '当前尚未启用飞书同步', '当前尚未启用飞书同步')" />
       </div>
       <template v-else>
         <div v-if="feishuSpaces.length" class="space-flow">
@@ -390,7 +390,7 @@ function openExternal(url?: string | null) {
         <div v-if="notes.loading && visibleFeishuNotes.length === 0" class="loading-row">
           <n-spin size="small" /><span>{{ t('ui.sync.003', '正在加载飞书内容…', '正在加载飞书内容…') }}</span>
         </div>
-        <n-empty v-else-if="visibleFeishuNotes.length === 0" description="t('ui.sync.002', '暂无同步后的飞书内容', '暂无同步后的飞书内容')" />
+        <n-empty v-else-if="visibleFeishuNotes.length === 0" :description="t('ui.sync.002', '暂无同步后的飞书内容', '暂无同步后的飞书内容')" />
         <div v-else class="note-list">
           <article v-for="note in visibleFeishuNotes" :key="note.id" class="note-item">
             <div class="note-main">
@@ -408,7 +408,7 @@ function openExternal(url?: string | null) {
               <button @click="downloadNote(note.id, note.title)">{{ t('ui.misc.005', '下载', '下载') }}</button>
               <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">{{ t('ui.misc.054', '重建索引', '重建索引') }}</button>
               <n-popconfirm @positive-click="removeNote(note.id)">
-                <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
+                <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', 'Delete') }}</button></template>
                 删除该笔记？
               </n-popconfirm>
             </div>
@@ -429,7 +429,7 @@ function openExternal(url?: string | null) {
       <div v-if="notes.loading && visibleLocalNotes.length === 0" class="loading-row">
         <n-spin size="small" /><span>{{ t('ui.misc.044', '正在加载…', '正在加载…') }}</span>
       </div>
-      <n-empty v-else-if="visibleLocalNotes.length === 0" description="t('ui.notes.006', '还没有本地知识内容', '还没有本地知识内容')" />
+      <n-empty v-else-if="visibleLocalNotes.length === 0" :description="t('ui.notes.006', '还没有本地知识内容', '还没有本地知识内容')" />
       <div v-else class="note-list">
         <article v-for="note in visibleLocalNotes" :key="note.id" class="note-item">
             <div class="note-main">
@@ -443,11 +443,11 @@ function openExternal(url?: string | null) {
             </div>
           <div class="note-actions">
             <span>{{ formatDate(note.created_at) }}</span>
-            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">{{ t('notes.open', '打开', '打开') }}</button>
+            <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">{{ t('notes.open', '打开', 'Open') }}</button>
             <button @click="downloadNote(note.id, note.title)">{{ t('ui.misc.005', '下载', '下载') }}</button>
             <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">{{ t('ui.misc.054', '重建索引', '重建索引') }}</button>
             <n-popconfirm @positive-click="removeNote(note.id)">
-              <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
+              <template #trigger><button class="danger">{{ t('chat.msg.delete', '删除', 'Delete') }}</button></template>
               删除该笔记？
             </n-popconfirm>
           </div>

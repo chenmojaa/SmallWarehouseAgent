@@ -169,10 +169,10 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
       <div class='quick-bar'>
         <div class='quick-stats'>
           <button class='qstat' @click='pickTab("presets")'>
-            <strong>{{ presets.length }}</strong><span>{{ t('mcp.tab.presets', '预设', '预设') }}</span>
+            <strong>{{ presets.length }}</strong><span>{{ t('mcp.tab.presets', '预设', 'Presets') }}</span>
           </button>
           <button class='qstat' :class='{ on: enabledCount > 0 }' @click='pickTab("servers")'>
-            <strong>{{ enabledCount }}</strong><span>{{ t('mcp.preset.enabled', '已启用', '已启用') }}</span>
+            <strong>{{ enabledCount }}</strong><span>{{ t('mcp.preset.enabled', '已启用', 'Enabled') }}</span>
           </button>
           <button class='qstat' @click='pickTab("servers")'>
             <strong>{{ servers.length }}</strong><span>{{ t('ui.misc.026', '总服务', '总服务') }}</span>
@@ -270,7 +270,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
               <n-button size='small' quaternary @click.stop='openEdit(server)'>{{ t('ui.misc.050', '编辑', '编辑') }}</n-button>
               <n-popconfirm @positive-click='removeServer(server)'>
                 <template #trigger>
-                  <n-button size='small' quaternary type='error' @click.stop>{{ t('chat.msg.delete', '删除', '删除') }}</n-button>
+                  <n-button size='small' quaternary type='error' @click.stop>{{ t('chat.msg.delete', '删除', 'Delete') }}</n-button>
                 </template>
                 确定删除「{{ server.name }}」？
               </n-popconfirm>
@@ -304,7 +304,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
         <section class='editor-section'>
           <div class='section-header'>
             <span class='section-icon'>🔌</span>
-            <h4>{{ t('mcp.add.transport', '传输方式', '传输方式') }}</h4>
+            <h4>{{ t('mcp.add.transport', '传输方式', 'Transport') }}</h4>
           </div>
           <div class='transport-toggle'>
             <button class='transport-btn' :class='{ active: form.transport === "stdio" }' type='button' @click='form.transport = "stdio"'>
@@ -319,8 +319,8 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
             </button>
           </div>
           <div class='field'>
-            <label v-if='form.transport === "stdio"' class='field-label'>{{ t('mcp.add.command', '启动命令', '启动命令') }}</label>
-            <label v-else class='field-label'>{{ t('mcp.add.url', '服务地址', '服务地址') }}</label>
+            <label v-if='form.transport === "stdio"' class='field-label'>{{ t('mcp.add.command', '启动命令', 'Command') }}</label>
+            <label v-else class='field-label'>{{ t('mcp.add.url', '服务地址', 'URL') }}</label>
             <n-input v-if='form.transport === "stdio"' v-model:value='form.command' placeholder='例如：npx / uvx / python' class='editor-input' />
             <n-input v-else v-model:value='form.url' placeholder='http://127.0.0.1:3000/mcp' class='editor-input' />
           </div>
@@ -342,7 +342,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
               </div>
             </div>
             <div class='field'>
-              <label class='field-label'>{{ t('mcp.add.env', '环境变量', '环境变量') }}<span class='optional'>{{ t('ui.misc.059', '（JSON 对象）', '（JSON 对象）') }}</span></label>
+              <label class='field-label'>{{ t('mcp.add.env', '环境变量', 'Environment') }}<span class='optional'>{{ t('ui.misc.059', '（JSON 对象）', '（JSON 对象）') }}</span></label>
               <n-input v-model:value='envText' type='textarea' :autosize='{ minRows: 2, maxRows: 5 }' placeholder='{"API_KEY": "sk-xxx"}' class='editor-input mono' />
             </div>
           </div>
@@ -350,7 +350,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
       </div>
       <template #footer>
         <div class='editor-footer'>
-          <n-button quaternary @click='editorOpen = false'>{{ t('chat.perm.confirm.cancel', '取消', '取消') }}</n-button>
+          <n-button quaternary @click='editorOpen = false'>{{ t('chat.perm.confirm.cancel', '取消', 'Cancel') }}</n-button>
           <n-button type='primary' :loading='saving' @click='saveServer'>
             {{ editingId ? '更新配置' : '添加服务' }}
           </n-button>

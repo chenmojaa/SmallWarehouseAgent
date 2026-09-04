@@ -168,13 +168,13 @@ async function saveEntry() {
     @update:show="(v) => addOpen = v"
     :mask-closable="!detecting && !saving"
     preset="card"
-    title="t('ui.models.003', '添加模型', '添加模型')"
+    :title="t('ui.models.003', '添加模型', '添加模型')"
     style="width: 460px; max-width: 92vw;"
   >
     <div class="add-form">
       <div class="form-row">
-        <label>{{ t('mcp.add.name', '名称', '名称') }}<span class="hint">{{ t('ui.misc.061', '（可选）', '（可选）') }}</span></label>
-        <n-input v-model:value="formName" placeholder="t('ui.misc.049', '给这套配置起个名字', '给这套配置起个名字')" />
+        <label>{{ t('mcp.add.name', '名称', 'Name') }}<span class="hint">{{ t('ui.misc.061', '（可选）', '（可选）') }}</span></label>
+        <n-input v-model:value="formName" :placeholder="t('ui.misc.049', '给这套配置起个名字', '给这套配置起个名字')" />
       </div>
       <div class="form-row">
         <label>Base URL</label>

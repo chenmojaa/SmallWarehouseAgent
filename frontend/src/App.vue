@@ -153,9 +153,9 @@ const paletteOpen = ref(false)
               <span v-else class="theme-icon">☾</span>
             </button>
             <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('ui.notes.003', '笔记', '笔记') }}</n-button></router-link>
-            <n-button quaternary size="small" @click="settingsOpen = true">{{ t('nav.settings', '设置', '设置') }}</n-button>
+            <n-button quaternary size="small" @click="settingsOpen = true">{{ t('nav.settings', '设置', 'Settings') }}</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
-            <n-button quaternary size="small" @click="handleLogout">{{ t('nav.logout', '退出', '退出') }}</n-button>
+            <n-button quaternary size="small" @click="handleLogout">{{ t('nav.logout', '退出', 'Logout') }}</n-button>
           </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">

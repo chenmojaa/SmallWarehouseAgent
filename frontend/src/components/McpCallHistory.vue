@@ -80,7 +80,7 @@ onMounted(load)
     <div class="hist-stats" v-if="stats">
       <div class="stat-card"><span class="stat-num">{{ stats.total }}</span><span class="stat-label">{{ t('ui.misc.027', '总调用', '总调用') }}</span></div>
       <div class="stat-card"><span class="stat-num" :style="{ color: statusColor('ok') }">{{ stats.by_status['ok'] || 0 }}</span><span class="stat-label">{{ t('ui.misc.028', '成功', '成功') }}</span></div>
-      <div class="stat-card"><span class="stat-num" :style="{ color: statusColor('error') }">{{ stats.by_status['error'] || 0 }}</span><span class="stat-label">{{ t('chat.tool.status.failed', '失败', '失败') }}</span></div>
+      <div class="stat-card"><span class="stat-num" :style="{ color: statusColor('error') }">{{ stats.by_status['error'] || 0 }}</span><span class="stat-label">{{ t('chat.tool.status.failed', '失败', 'failed') }}</span></div>
       <div class="stat-card"><span class="stat-num">{{ stats.avg_latency_ms }}ms</span><span class="stat-label">{{ t('ui.misc.022', '平均延迟', '平均延迟') }}</span></div>
       <div class="stat-card"><span class="stat-num">{{ stats.p95_latency_ms }}ms</span><span class="stat-label">P95</span></div>
     </div>
@@ -88,9 +88,9 @@ onMounted(load)
       <select v-model="filterStatus" class="hist-select">
         <option :value="null">{{ t('ui.misc.010', '全部状态', '全部状态') }}</option>
         <option value="ok">{{ t('ui.misc.028', '成功', '成功') }}</option>
-        <option value="error">{{ t('chat.tool.status.failed', '失败', '失败') }}</option>
+        <option value="error">{{ t('chat.tool.status.failed', '失败', 'failed') }}</option>
         <option value="timeout">{{ t('ui.misc.052', '超时', '超时') }}</option>
-        <option value="denied">{{ t('chat.perm.dialog.deny', '拒绝', '拒绝') }}</option>
+        <option value="denied">{{ t('chat.perm.dialog.deny', '拒绝', 'Deny') }}</option>
       </select>
       <select v-model="filterServer" class="hist-select">
         <option :value="null">{{ t('ui.misc.009', '全部服务', '全部服务') }}</option>
@@ -99,8 +99,8 @@ onMounted(load)
       <button class="hist-btn" @click="load">{{ t('ui.misc.063', '🔄 刷新', '🔄 刷新') }}</button>
       <button class="hist-btn danger" @click="clear">{{ t('ui.misc.064', '🗑 清空', '🗑 清空') }}</button>
     </div>
-    <div v-if="loading" class="hist-empty">{{ t('common.loading', '加载中…', '加载中…') }}</div>
-    <div v-else-if="filtered.length === 0" class="hist-empty">{{ t('mcp.history.empty', '暂无调用记录', '暂无调用记录') }}</div>
+    <div v-if="loading" class="hist-empty">{{ t('common.loading', '加载中…', 'Loading…') }}</div>
+    <div v-else-if="filtered.length === 0" class="hist-empty">{{ t('mcp.history.empty', '暂无调用记录', 'No calls yet') }}</div>
     <div v-else class="hist-list">
       <details v-for="c in filtered.slice(0, 100)" :key="c.id" class="hist-item">
         <summary>
@@ -112,7 +112,7 @@ onMounted(load)
         </summary>
         <div class="hist-body">
           <div v-if="c.arguments" class="hist-block">
-            <div class="hist-label">{{ t('chat.perm.dialog.args', '参数', '参数') }}</div>
+            <div class="hist-label">{{ t('chat.perm.dialog.args', '参数', 'Arguments') }}</div>
             <pre>{{ JSON.stringify(c.arguments, null, 2) }}</pre>
           </div>
           <div v-if="c.result_preview" class="hist-block">

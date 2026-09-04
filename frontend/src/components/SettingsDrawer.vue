@@ -359,7 +359,7 @@ async function doDeleteAccount() {
           <div class="form-row">
             <label>{{ t('settings.lang.label', '语言', 'Language') }}</label>
             <div class="lang-toggle">
-              <button class="lang-btn" :class="{ active: lang === 'zh' }" @click="setLang('zh')">{{ t('settings.lang.zh', '中文', '中文') }}</button>
+              <button class="lang-btn" :class="{ active: lang === 'zh' }" @click="setLang('zh')">{{ t('settings.lang.zh', '中文', 'Chinese') }}</button>
               <button class="lang-btn" :class="{ active: lang === 'en' }" @click="setLang('en')">English</button>
             </div>
           </div>

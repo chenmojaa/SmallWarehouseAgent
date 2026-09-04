@@ -113,13 +113,13 @@ async function doChangePwd() {
       <n-card v-if="mode === 'login'" class="auth-card" :bordered="false">
         <template #header>{{ t('auth.login.title', '账号登录', 'Account Login') }}</template>
         <n-form @keyup.enter="doLogin">
-          <n-form-item label="t('auth.login.account', '账号', 'Account')" label-placement="top">
-            <n-input v-model:value="account" placeholder="t('auth.login.placeholder.account', '请输入手机号', 'Enter phone number')" :input-props="{ autocomplete: 'username' }" />
+          <n-form-item :label="t('auth.login.account', '账号', 'Account')" label-placement="top">
+            <n-input v-model:value="account" :placeholder="t('auth.login.placeholder.account', '请输入手机号', 'Enter phone number')" :input-props="{ autocomplete: 'username' }" />
           </n-form-item>
-          <n-form-item label="t('auth.login.password', '密码', 'Password')" label-placement="top">
+          <n-form-item :label="t('auth.login.password', '密码', 'Password')" label-placement="top">
             <n-input
               v-model:value="password" type="password" show-password-on="click"
-              placeholder="t('auth.login.placeholder.password', '请输入密码', 'Enter password')" :input-props="{ autocomplete: 'current-password' }"
+              :placeholder="t('auth.login.placeholder.password', '请输入密码', 'Enter password')" :input-props="{ autocomplete: 'current-password' }"
             />
           </n-form-item>
           <n-button type="primary" block :loading="loading" @click="doLogin">{{ t('auth.login.submit', '登 录', 'Log In') }}</n-button>
@@ -135,14 +135,14 @@ async function doChangePwd() {
       <n-card v-else-if="mode === 'register'" class="auth-card" :bordered="false">
         <template #header>{{ t('auth.register.title', '注册账号', 'Create Account') }}</template>
         <n-form @keyup.enter="doRegister">
-          <n-form-item label="t('auth.register.phone', '手机号', 'Phone')" label-placement="top">
-            <n-input v-model:value="regPhone" placeholder="t('auth.login.placeholder.account', '请输入手机号', 'Enter phone number')" maxlength="11" />
+          <n-form-item :label="t('auth.register.phone', '手机号', 'Phone')" label-placement="top">
+            <n-input v-model:value="regPhone" :placeholder="t('auth.login.placeholder.account', '请输入手机号', 'Enter phone number')" maxlength="11" />
           </n-form-item>
-          <n-form-item label="t('auth.login.password', '密码', 'Password')" label-placement="top">
-            <n-input v-model:value="regPassword" type="password" show-password-on="click" placeholder="t('auth.register.placeholder.password', '至少 6 位', 'At least 6 chars')" />
+          <n-form-item :label="t('auth.login.password', '密码', 'Password')" label-placement="top">
+            <n-input v-model:value="regPassword" type="password" show-password-on="click" :placeholder="t('auth.register.placeholder.password', '至少 6 位', 'At least 6 chars')" />
           </n-form-item>
-          <n-form-item label="t('auth.register.password2', '确认密码', 'Confirm Password')" label-placement="top">
-            <n-input v-model:value="regPassword2" type="password" show-password-on="click" placeholder="t('auth.register.placeholder.password2', '再次输入密码', 'Re-enter password')" />
+          <n-form-item :label="t('auth.register.password2', '确认密码', 'Confirm Password')" label-placement="top">
+            <n-input v-model:value="regPassword2" type="password" show-password-on="click" :placeholder="t('auth.register.placeholder.password2', '再次输入密码', 'Re-enter password')" />
           </n-form-item>
           <n-button type="primary" block :loading="loading" @click="doRegister">{{ t('auth.login.toRegister', '注 册', 'Sign Up') }}</n-button>
         </n-form>
@@ -158,14 +158,14 @@ async function doChangePwd() {
           输入手机号 + 旧密码 + 新密码以验证身份。修改成功后请用新密码登录。
         </n-text>
         <n-form @keyup.enter="doChangePwd">
-          <n-form-item label="t('auth.register.phone', '手机号', 'Phone')" label-placement="top">
-            <n-input v-model:value="cpPhone" placeholder="t('ui.auth.002', '请输入注册时的手机号', '请输入注册时的手机号')" maxlength="11" />
+          <n-form-item :label="t('auth.register.phone', '手机号', 'Phone')" label-placement="top">
+            <n-input v-model:value="cpPhone" :placeholder="t('ui.auth.002', '请输入注册时的手机号', '请输入注册时的手机号')" maxlength="11" />
           </n-form-item>
-          <n-form-item label="t('auth.change.old', '旧密码', 'Current Password')" label-placement="top">
-            <n-input v-model:value="cpOldPassword" type="password" show-password-on="click" placeholder="t('ui.auth.001', '请输入当前密码', '请输入当前密码')" />
+          <n-form-item :label="t('auth.change.old', '旧密码', 'Current Password')" label-placement="top">
+            <n-input v-model:value="cpOldPassword" type="password" show-password-on="click" :placeholder="t('ui.auth.001', '请输入当前密码', '请输入当前密码')" />
           </n-form-item>
-          <n-form-item label="t('auth.change.new', '新密码', 'New Password')" label-placement="top">
-            <n-input v-model:value="cpNewPassword" type="password" show-password-on="click" placeholder="t('auth.register.placeholder.password', '至少 6 位', 'At least 6 chars')" />
+          <n-form-item :label="t('auth.change.new', '新密码', 'New Password')" label-placement="top">
+            <n-input v-model:value="cpNewPassword" type="password" show-password-on="click" :placeholder="t('auth.register.placeholder.password', '至少 6 位', 'At least 6 chars')" />
           </n-form-item>
           <n-button type="primary" block :loading="loading" @click="doChangePwd">{{ t('auth.change.submit', '确认修改', 'Update Password') }}</n-button>
         </n-form>

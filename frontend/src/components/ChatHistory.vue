@@ -87,7 +87,7 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
   <div class="chat-history">
     <div class="chat-history-actions">
       <n-button block quaternary @click="newChat" class="action-btn new-chat-btn">{{ t('ui.chat.001', '+ 新对话', '+ 新对话') }}</n-button>
-      <n-button block quaternary @click="gotoNotes" class="action-btn">{{ t('nav.notes', '知识库', '知识库') }}</n-button>
+      <n-button block quaternary @click="gotoNotes" class="action-btn">{{ t('nav.notes', '知识库', 'Knowledge Base') }}</n-button>
       <n-button block quaternary @click="openSearch" class="action-btn">{{ t('ui.chat.004', '搜索对话', '搜索对话') }}</n-button>
       <n-button block quaternary @click="gotoSkillsMcp" class="action-btn">{{ t('ui.skills.006', '技能 · MCP', '技能 · MCP') }}</n-button>
     </div>
@@ -97,7 +97,7 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
     <div class="chat-history-list">
       <div v-if="sessions.loading && sessions.items.length === 0" class="loading-row">
         <n-spin size="small" />
-        <n-text depth="3" style="font-size: 12px">{{ t('common.loading', '加载中…', '加载中…') }}</n-text>
+        <n-text depth="3" style="font-size: 12px">{{ t('common.loading', '加载中…', 'Loading…') }}</n-text>
       </div>
       <template v-else-if="sessions.items.length > 0">
         <button v-if="sessions.error" class="stale-retry" type="button" @click="retryInitialLoad">
@@ -111,7 +111,7 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
         >
           <div class="session-row">
             <span class="session-title">{{ s.title }}</span>
-            <n-button text size="small" @click.stop="forkSession(s.id, $event)" class="fork-btn" title="t('ui.chat.002', '分叉：复制对话与全部消息到新会话', '分叉：复制对话与全部消息到新会话')">⤴</n-button>
+            <n-button text size="small" @click.stop="forkSession(s.id, $event)" class="fork-btn" :title="t('ui.chat.002', '分叉：复制对话与全部消息到新会话', '分叉：复制对话与全部消息到新会话')">⤴</n-button>
             <n-popconfirm @positive-click="removeSession(s.id, $event)">
               <template #trigger>
                 <n-button text size="small" type="error" @click.stop class="delete-btn">✕</n-button>
@@ -123,19 +123,19 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
           <div class="session-meta">{{ fmt(s.updated_at) }} · {{ s.message_count }} 条</div>
         </div>
       </template>
-      <n-empty v-else-if="sessions.error" size="small" description="t('ui.misc.015', '历史记录加载失败', '历史记录加载失败')" style="padding: 24px 0">
+      <n-empty v-else-if="sessions.error" size="small" :description="t('ui.misc.015', '历史记录加载失败', '历史记录加载失败')" style="padding: 24px 0">
         <template #extra>
-          <n-button size="small" @click="retryInitialLoad">{{ t('common.retry', '重试', '重试') }}</n-button>
+          <n-button size="small" @click="retryInitialLoad">{{ t('common.retry', '重试', 'Retry') }}</n-button>
         </template>
       </n-empty>
-      <n-empty v-else size="small" description="t('ui.chat.006', '点击 + 新对话 开始', '点击 + 新对话 开始')" style="padding: 24px 0" />
+      <n-empty v-else size="small" :description="t('ui.chat.006', '点击 + 新对话 开始', '点击 + 新对话 开始')" style="padding: 24px 0" />
     </div>
   </div>
   <!-- 搜索对话 -->
-  <n-modal v-model:show="searchOpen" preset="card" title="t('ui.chat.004', '搜索对话', '搜索对话')" style="max-width: 480px">
-    <n-input v-model:value="searchQuery" placeholder="t('ui.chat.003', '搜索会话标题或预览片段', '搜索会话标题或预览片段')" clearable />
+  <n-modal v-model:show="searchOpen" preset="card" :title="t('ui.chat.004', '搜索对话', '搜索对话')" style="max-width: 480px">
+    <n-input v-model:value="searchQuery" :placeholder="t('ui.chat.003', '搜索会话标题或预览片段', '搜索会话标题或预览片段')" clearable />
     <n-space vertical size="small" style="margin-top: 12px; max-height: 360px; overflow-y: auto">
-      <n-empty v-if="!sessions.loading && searchedSessions.length === 0" description="t('ui.chat.005', '没有匹配的对话', '没有匹配的对话')" />
+      <n-empty v-if="!sessions.loading && searchedSessions.length === 0" :description="t('ui.chat.005', '没有匹配的对话', '没有匹配的对话')" />
       <div
         v-for="s in searchedSessions"
         :key="s.id"

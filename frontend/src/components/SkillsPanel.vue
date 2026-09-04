@@ -226,7 +226,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
         size="small"
         round
         clearable
-        placeholder="t('ui.skills.008', '搜索技能名称或描述', '搜索技能名称或描述')"
+        :placeholder="t('ui.skills.008', '搜索技能名称或描述', '搜索技能名称或描述')"
       >
         <template #prefix><span class="skill-search-icon">🔍</span></template>
       </n-input>
@@ -246,7 +246,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
           <h3>{{ t('ui.skills.007', '推荐技能', '推荐技能') }}</h3>
           <span class="section-meta">{{ t('ui.misc.041', '来自 GitHub · anthropics/skills', '来自 GitHub · anthropics/skills') }}</span>
         </div>
-        <n-empty v-if="filteredRecommended.length === 0" class="empty-spacing" description="t('ui.skills.010', '没有匹配的推荐技能', '没有匹配的推荐技能')" />
+        <n-empty v-if="filteredRecommended.length === 0" class="empty-spacing" :description="t('ui.skills.010', '没有匹配的推荐技能', '没有匹配的推荐技能')" />
         <div v-else class="skill-grid">
           <article v-for="skill in filteredRecommended" :key="skill.id" class="skill-card">
             <div class="skill-card-top">
@@ -294,7 +294,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
                 </button>
                 <a v-if="skill.source_url" :href="skill.source_url" target="_blank" rel="noreferrer">{{ t('ui.misc.039', '来源', '来源') }}</a>
                 <n-popconfirm @positive-click="removeSkill(skill.id)">
-                  <template #trigger><button type="button">{{ t('chat.msg.delete', '删除', '删除') }}</button></template>
+                  <template #trigger><button type="button">{{ t('chat.msg.delete', '删除', 'Delete') }}</button></template>
                   删除该技能？
                 </n-popconfirm>
               </div>
@@ -325,7 +325,7 @@ defineExpose({ summary: computed(() => ({ installed: installedSkills.value.lengt
     </div>
 
     <!-- 添加技能弹窗：单一选择入口 -->
-    <n-modal v-model:show="uploadOpen" preset="card" title="t('ui.skills.011', '添加技能', '添加技能')" style="max-width: 460px">
+    <n-modal v-model:show="uploadOpen" preset="card" :title="t('ui.skills.011', '添加技能', '添加技能')" style="max-width: 460px">
       <div class="skill-upload-body">
         <p class="skill-upload-tip">{{ t('ui.misc.051', '请选择包含', '请选择包含') }}<code>SKILL.md</code>{{ t('ui.skills.012', '的技能文件夹或压缩包（.zip / .tar.gz / .tgz）', '的技能文件夹或压缩包（.zip / .tar.gz / .tgz）') }}</p>
         <div

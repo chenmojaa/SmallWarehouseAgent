@@ -130,10 +130,10 @@ function onKey(e: KeyboardEvent) {
               v-model="query"
               class="cmd-input"
               type="text"
-              placeholder="t('palette.title', '搜索命令、会话或操作…', '搜索命令、会话或操作…')"
+              :placeholder="t('palette.title', '搜索命令、会话或操作…', 'Search commands, sessions, or actions…')"
               @keydown="onKey"
             />
-            <button class="cmd-close" @click="emit('update:show', false)" aria-label="t('chat.kb.off', '关闭', '关闭')">×</button>
+            <button class="cmd-close" @click="emit('update:show', false)" :aria-label="t('chat.kb.off', '关闭', 'Off')">×</button>
           </div>
           <div class="cmd-body">
             <div v-if="filtered.length === 0" class="cmd-empty">
@@ -156,9 +156,9 @@ function onKey(e: KeyboardEvent) {
             </div>
           </div>
           <div class="cmd-footer">
-            <span><kbd>↑</kbd><kbd>↓</kbd>{{ t('palette.footer.updown', '选择', '选择') }}</span>
-            <span><kbd>Enter</kbd>{{ t('palette.footer.enter', '执行', '执行') }}</span>
-            <span><kbd>Esc</kbd>{{ t('chat.kb.off', '关闭', '关闭') }}</span>
+            <span><kbd>↑</kbd><kbd>↓</kbd>{{ t('palette.footer.updown', '选择', 'Select') }}</span>
+            <span><kbd>Enter</kbd>{{ t('palette.footer.enter', '执行', 'Run') }}</span>
+            <span><kbd>Esc</kbd>{{ t('chat.kb.off', '关闭', 'Off') }}</span>
             <span class="cmd-footer-spacer"></span>
             <span class="cmd-footer-brand">{{ filtered.length }} 个结果</span>
           </div>
