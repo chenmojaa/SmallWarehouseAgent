@@ -21,7 +21,6 @@ export interface ChatRequest {
   model?: string | null
   use_rag?: boolean
   use_planner?: boolean | null
-  plan_override?: PlanOverridePayload | null
   session_id?: string | null
   base_url?: string | null
   api_key?: string | null
@@ -31,18 +30,11 @@ export interface ChatRequest {
   agent_permission?: 'default' | 'full'
 }
 
-/** HITL 计划审批：用户批准/编辑后的计划（阶段 2 传入） */
-export interface PlanOverridePayload {
-  summary?: string
-  steps: string[]
-}
-
-/** HITL 计划审批阶段 1：计划预览响应 */
-export interface PlanPreviewResponse {
-  needs_plan: boolean
-  intent: string
-  plan_summary?: string
-  steps?: string[]
+/** 歧义澄清请求（router 判定问题有歧义时经 SSE 下发） */
+export interface ClarifyEvent {
+  request_id: string
+  question: string
+  options: string[]
 }
 
 export interface StageEvent {
@@ -119,9 +111,9 @@ export interface PermissionEvent {
 }
 
 export interface ChatStreamEvent {
-  type: "session" | "delta" | "citations" | "done" | "error" | "stage" | "ingest" | "report" | "tool" | "permission" | "plan"
+  type: "session" | "delta" | "citations" | "done" | "error" | "stage" | "ingest" | "report" | "tool" | "permission" | "plan" | "clarify"
   session_id?: string
-  data?: string | Citation[] | StageEvent | IngestResult | ReportResult | ToolEvent | PermissionEvent | PlanEvent
+  data?: string | Citation[] | StageEvent | IngestResult | ReportResult | ToolEvent | PermissionEvent | PlanEvent | ClarifyEvent
 }
 
 /** 回复 Agent 的本地访问权限请求（允许 / 拒绝） */
@@ -129,22 +121,9 @@ export async function respondPermission(requestId: string, approve: boolean): Pr
   return postJson<{ ok: boolean }>('/chat/permission', { request_id: requestId, approve })
 }
 
-/** HITL 计划审批阶段 1：预览计划（只读，不写会话） */
-export async function planPreview(req: ChatRequest, signal?: AbortSignal): Promise<PlanPreviewResponse> {
-  return postJson<PlanPreviewResponse>('/chat/plan-preview', {
-    messages: req.messages,
-    provider: req.provider || undefined,
-    model: req.model || undefined,
-    use_rag: req.use_rag !== false,
-    use_planner: true,
-    session_id: req.session_id || undefined,
-    base_url: req.base_url || undefined,
-    api_key: req.api_key || undefined,
-    reasoning_level: req.reasoning_level || undefined,
-    embedding_model: req.embedding_model || undefined,
-    embedding_base_url: req.embedding_base_url || undefined,
-    agent_permission: req.agent_permission || "default",
-  }, signal)
+/** 回复歧义澄清（点选项 / 自由输入；空串=跳过，按原问题继续） */
+export async function respondClarify(requestId: string, answer: string): Promise<{ ok: boolean }> {
+  return postJson<{ ok: boolean }>('/chat/clarify', { request_id: requestId, answer })
 }
 
 // 移除 <think>...</think> 思考段落（配对的 + 未闭合的尾部）
@@ -164,7 +143,6 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
     model: req.model || undefined,
     use_rag: req.use_rag !== false,
     use_planner: req.use_planner === undefined ? undefined : req.use_planner,
-    plan_override: req.plan_override || undefined,
     session_id: req.session_id || undefined,
     base_url: req.base_url || undefined,
     api_key: req.api_key || undefined,
@@ -192,6 +170,8 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
       try { yield { type: "permission", data: JSON.parse(ev.data) } } catch {}
     } else if (ev.event === "plan") {
       try { yield { type: "plan", data: JSON.parse(ev.data) } } catch {}
+    } else if (ev.event === "clarify") {
+      try { yield { type: "clarify", data: JSON.parse(ev.data) } } catch {}
     } else if (ev.event === "error") {
       yield { type: "error", data: ev.data }
     } else if (ev.event === "ingest") {

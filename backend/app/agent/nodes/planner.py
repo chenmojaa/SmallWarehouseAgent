@@ -84,19 +84,6 @@ def planner_node(state: AgentState) -> dict:
         "plan_summary": "",
         "step_count": state.get("step_count", 0) + 1,
     }
-    # HITL 计划审批：用户已批准/编辑过的计划直接采用，跳过 LLM 规划。
-    # 放在 use_planner 检查之前，确保 Plan 开关关闭时批准的计划仍会执行。
-    ov = state.get("plan_override") or {}
-    if isinstance(ov, dict):
-        ov_steps = [str(q).strip() for q in (ov.get("steps") or []) if str(q).strip()]
-        if ov_steps:
-            capped = ov_steps[:max(1, int(settings.planner_max_steps))]
-            _log.info("planner: using user-approved plan (%d steps)", len(capped))
-            return {
-                "plan": [{"query": q} for q in capped],
-                "plan_summary": str(ov.get("summary") or "").strip(),
-                "step_count": state.get("step_count", 0) + 1,
-            }
     # 请求级覆盖（前端 Plan 开关）优先于服务端 HD_PLANNER_ENABLED
     override = state.get("use_planner")
     enabled = settings.planner_enabled if override is None else bool(override)

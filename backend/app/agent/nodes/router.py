@@ -46,7 +46,7 @@ def _is_fast_chat(query: str) -> bool:
 
 ROUTER_PROMPT = """你是 HD 知识库的任务路由器。请阅读对话历史和最新消息,只输出一个 JSON 对象,不要任何其他文字:
 
-{"intent": "<chat|research|ingest|report>", "rewritten_query": "<string>"}
+{"intent": "<chat|research|ingest|report>", "rewritten_query": "<string>", "ambiguous": <true|false>, "clarify": {"question": "<string>", "options": ["<选项1>", "<选项2>"]}}
 
 Intent 分类规则:
 - chat: 闲聊、简单事实问答、不需要综合多个来源
@@ -59,16 +59,29 @@ rewritten_query 规则:
 - 只输出重写后的问题本身,不要回答它
 - 语言保持与用户最新消息相同
 
+ambiguity 歧义检测规则:
+- 仅当问题包含多义词/指代不明,且无法从对话历史判断具体所指时,才 ambiguous=true
+- ambiguous=true 时给出 clarify.question(一句自然的中文提问)和 2-4 个 clarify.options(候选含义)
+- 大多数问题 ambiguous=false,此时省略 clarify 字段
+- 示例: "帮我调研哪吒" -> ambiguous=true, question="你想了解的是哪个「哪吒」?", options=["哪吒汽车(新能源汽车品牌)", "动漫/神话中的哪吒角色"]
+
 示例:
 历史: [user] 牛魔王的来历? [assistant] 牛魔王是...
 输入: "他儿子呢?"
-输出: {"intent": "research", "rewritten_query": "牛魔王的儿子(红孩儿)的背景是什么?"}
+输出: {"intent": "research", "rewritten_query": "牛魔王的儿子(红孩儿)的背景是什么?", "ambiguous": false}
 """
+
+
+class ClarifySpec(BaseModel):
+    question: str = Field("", description="natural clarifying question for the user")
+    options: list[str] = Field(default_factory=list, description="2-4 candidate meanings")
 
 
 class RouterDecision(BaseModel):
     intent: Intent = Field("chat", description="routing decision")
     rewritten_query: str = Field("", description="history-resolved complete question")
+    ambiguous: bool = Field(False, description="query is ambiguous and needs user clarification")
+    clarify: ClarifySpec | None = None
 
 
 def _recent_history(messages, limit: int = 3) -> list[dict]:
@@ -152,19 +165,32 @@ def router_node(state: AgentState) -> dict:
                 "step_count": state.get("step_count", 0) + 1}
 
     rewritten = (decision.rewritten_query or "").strip() or query
-    return {
+    result: dict = {
         "intent": decision.intent,
         "rewritten_query": rewritten,
         "step_count": state.get("step_count", 0) + 1,
+        "clarify_request": None,
     }
+    # 歧义澄清：模型判定问题有歧义且本轮允许追问时挂起请求。
+    # skip_clarify=True（用户已回答后的二次执行）时不再重复询问。
+    spec = decision.clarify
+    if (decision.ambiguous and spec and (spec.question or "").strip()
+            and not state.get("skip_clarify")):
+        options = [str(o).strip() for o in (spec.options or []) if str(o).strip()]
+        result["clarify_request"] = {
+            "question": spec.question.strip(),
+            "options": options[:4],
+        }
+        _log.info("router: ambiguous query, clarifying (options=%d)", len(options[:4]))
+    return result
 
 
 def route_by_intent(state: AgentState) -> str:
     """Conditional edge dispatcher. Used by LangGraph after the router."""
-    # HITL 计划审批：阶段 1 已判定 research 且用户已批准计划，
-    # 阶段 2 无条件走 research（router 重跑抖动 / Plan 开关状态不影响执行）。
-    if state.get("plan_override"):
-        return "research"
+    # 歧义澄清（模型驱动，始终开启）：路由器判定需要追问 -> 图先终止，
+    # chat.py 拦截 clarify_request，发 SSE 事件等用户回答后带 skip_clarify 重跑。
+    if state.get("clarify_request") and not state.get("skip_clarify"):
+        return "clarify"
     intent = (state.get("intent") or "chat").lower()
     # Plan Mode (Codex CLI / Claude Code parity): if the user toggled it on,
     # escalate chat-classified queries so the planner still gets a chance to

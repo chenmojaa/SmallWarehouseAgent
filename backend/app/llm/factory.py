@@ -52,13 +52,47 @@ _ANTHROPIC_THINK_BUDGET: dict[str, int] = {
 def _resolve_base_url(provider: str, base_url: str | None) -> str | None:
   if base_url:
     return base_url
+  # Explicit env base first -- works for ANY provider (incl. MiniMax and other
+  # custom endpoints not in the compat map), then the server-side stored base.
+  # Previously only providers inside OPENAI_COMPAT_BASE_URLS got the env base,
+  # which silently pointed e.g. a "minimax" router model at api.openai.com.
+  env_base = (settings.llm_api_base or "").strip()
+  if env_base:
+    return env_base
+  try:
+    from app.storage import llm_config_store as _lcs
+    stored = (_lcs.get_base_url() or "").strip()
+    if stored:
+      return stored
+  except Exception:
+    pass
   if provider in OPENAI_COMPAT_BASE_URLS:
-    return (settings.llm_api_base or "").strip() or OPENAI_COMPAT_BASE_URLS[provider]
+    return OPENAI_COMPAT_BASE_URLS[provider]
   return None
 
 
 def _resolve_api_key(api_key: str | None) -> str | None:
-  return (api_key or settings.llm_api_key or "").strip() or None
+  # Masked-echo guard: /api/custom-models returns apiKey masked (sk****xx) and
+  # clients may echo it back verbatim. A real key never contains '*', so treat
+  # masked values as absent and fall through to env / stored credentials.
+  key = (api_key or "").strip()
+  if key and "*" not in key:
+    return key
+  env_key = (settings.llm_api_key or "").strip()
+  if env_key:
+    return env_key
+  # Fall back to the server-side stored key (same chain as embeddings/factory)
+  # so server-driven LLM calls -- router intent classification / clarify
+  # detection, background jobs -- still have credentials when the request
+  # itself carries no key (e.g. right after re-login, models not yet loaded).
+  try:
+    from app.storage import llm_config_store as _lcs
+    stored = (_lcs.get_api_key() or "").strip()
+    if stored:
+      return stored
+  except Exception:
+    pass
+  return None
 
 
 def _build_model(provider=None, model=None, api_key=None, base_url=None, reasoning_level=None):

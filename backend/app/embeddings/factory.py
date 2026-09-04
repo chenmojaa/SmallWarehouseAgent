@@ -27,10 +27,14 @@ def _resolve_url(base_url):
 
 
 def _resolve_key(api_key):
-  # Request-provided key wins; then env; then the server-side stored key so
+  # Request-provided key wins (masked echoes from /api/custom-models contain
+  # '*' and are ignored); then env; then the server-side stored key so
   # background re-vectorization (no request context) still has credentials.
   from app.storage import llm_config_store as _lcs
-  return (api_key or settings.embedding_api_key or settings.llm_api_key or _lcs.get_api_key() or "").strip()
+  key = (api_key or "").strip()
+  if key and "*" not in key:
+    return key
+  return (settings.embedding_api_key or settings.llm_api_key or _lcs.get_api_key() or "").strip()
 
 
 def _resolve_model(model):
@@ -162,7 +166,11 @@ def embed_texts(texts, api_key=None, base_url=None, model=None, mode="db"):
   with httpx.Client(timeout=60.0) as cli:
     for i in range(0, len(cleaned), EMBED_BATCH):
       chunk = cleaned[i:i + EMBED_BATCH]
-      body = _build_body(chunk, m, base_url, mode=mode)
+      # Provider detection must use the RESOLVED url, not the raw base_url
+      # param: when base_url is None the fallback chain in _resolve_url may
+      # still land on MiniMax, which requires {"texts": ...} instead of
+      # OpenAI-style {"input": ...} (upstream 2013 otherwise).
+      body = _build_body(chunk, m, url, mode=mode)
       r = cli.post(url, headers=headers, json=body)
       if r.status_code != 200:
         # Surface upstream status_msg when present.
