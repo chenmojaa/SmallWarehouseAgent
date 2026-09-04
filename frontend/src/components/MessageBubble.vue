@@ -147,15 +147,47 @@ const md = new Marked({
   breaks: true,
 })
 
+// 提取 mermaid 类型标题，用于卡片 header
+const MMD_TITLE_RE = /^flowchart\s+(?:TD|TB|LR|RL|BT|TD)\s+(?:([\u4e00-\u9fff\w]{2,20})\s+\n|.*?\n)/i
+function extractMermaidTitle(src: string): string {
+  // 优先从首行注释或子图标题取
+  const firstLine = src.split('\n')[0].trim()
+  if (firstLine.startsWith('title ')) return firstLine.slice(6).trim()
+  if (firstLine.startsWith('---') && firstLine.endsWith('---')) return firstLine.slice(3, -3).trim()
+  // flowchart / sequenceDiagram 等类型名
+  if (/^(flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|mindmap|pie)/i.test(firstLine)) {
+    // 取第二个 token 作为标题
+    const parts = firstLine.split(/\s+/)
+    if (parts.length >= 2) {
+      const t = parts[1]
+      // 如果是方向词则跳过
+      if (!['TD','TB','LR','RL','BT','TD'].includes(t.toUpperCase())) return t
+    }
+  }
+  return ''
+}
+
 md.use({
   renderer: {
     code(token: Tokens.Code): string {
       const lang = (token.lang || '').trim()
       const text = token.text
       if (lang === 'mermaid') {
-        // Keep raw source in data-source so we can re-render after mount.
-        return '<div class="mermaid-block" data-source="' +
-          encodeURIComponent(text) + '">' + escapeHtml(text) + '</div>'
+        const title = extractMermaidTitle(text) || '流程图'
+        const source = encodeURIComponent(text)
+        return `<div class="mermaid-card" data-source="${source}">` +
+          `<div class="mermaid-card-header">` +
+            `<span class="mermaid-card-title">${title}</span>` +
+            `<div class="mermaid-card-toolbar">` +
+              `<button class="mermaid-action" data-action="toggle" title="折叠/展开"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2 5 7 10 12 5"/></svg></button>` +
+              `<button class="mermaid-action" data-action="copy" title="复制源码"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="8" height="8" rx="1"/><path d="M10 4V2.5a1 1 0 0 0-1-1H4.5a1 1 0 0 0-1 1V10h1.5"/></svg></button>` +
+              `<button class="mermaid-action" data-action="download" title="下载 PNG"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2v8M3 7l4 4 4-4M2 12h10"/></svg></button>` +
+            `</div>` +
+          `</div>` +
+          `<div class="mermaid-card-body">` +
+            `<div class="mermaid-block" data-source="${source}">${escapeHtml(text)}</div>` +
+          `</div>` +
+        `</div>`
       }
       const langClass = lang ? ' class="language-' + escapeHtml(lang) + '"' : ''
       return '<pre><code' + langClass + '>' + escapeHtml(text) + '</code></pre>'
@@ -167,7 +199,7 @@ const renderedHtml = computed(() => {
   if (props.role !== 'assistant') return ''
   const raw = md.parse(bodyNoCite.value, { async: false }) as string
   return DOMPurify.sanitize(raw, {
-    ADD_ATTR: ['data-source', 'data-rendered', 'class', 'data-cite', 'title'],
+    ADD_ATTR: ['data-source', 'data-rendered', 'data-action', 'class', 'data-cite', 'title'],
     ADD_TAGS: ['span'],
   })
 })
@@ -179,10 +211,37 @@ function bindMdBodyClick(): void {
   if (!el) return
   if (mdBodyClickHandler) el.removeEventListener('click', mdBodyClickHandler)
   mdBodyClickHandler = (e: MouseEvent) => {
-    const target = (e.target as HTMLElement).closest('.cite-inline') as HTMLElement | null
-    if (!target) return
-    const n = parseInt(target.getAttribute('data-cite') || '', 10)
-    if (!isNaN(n)) toggle(n)
+    // 1) 内联 [n] 引用
+    const citeTarget = (e.target as HTMLElement).closest('.cite-inline') as HTMLElement | null
+    if (citeTarget) {
+      const n = parseInt(citeTarget.getAttribute('data-cite') || '', 10)
+      if (!isNaN(n)) toggle(n)
+      return
+    }
+    // 2) Mermaid 卡片操作按钮（右上角 toolbar / 折叠）
+    const cardAction = (e.target as HTMLElement).closest('.mermaid-action') as HTMLElement | null
+    if (cardAction) {
+      const card = cardAction.closest('.mermaid-card') as HTMLElement | null
+      if (!card) return
+      const action = cardAction.getAttribute('data-action')
+      const body = card.querySelector('.mermaid-card-body') as HTMLElement | null
+      if (action === 'toggle') {
+        card.classList.toggle('collapsed')
+      } else if (action === 'copy' && body) {
+        const src = decodeURIComponent(body.querySelector('.mermaid-block')?.getAttribute('data-source') || '')
+        navigator.clipboard.writeText(src).catch(() => {})
+      } else if (action === 'download' && body) {
+        const svgEl = body.querySelector('svg')
+        if (svgEl) downloadMermaidSvg(svgEl, card.querySelector('.mermaid-card-title')?.textContent || '流程图')
+      }
+      return
+    }
+    // 3) Mermaid 卡片标题栏（整条 header 点击折叠）
+    const cardHeader = (e.target as HTMLElement).closest('.mermaid-card-header') as HTMLElement | null
+    if (cardHeader) {
+      const card = cardHeader.closest('.mermaid-card') as HTMLElement | null
+      if (card) card.classList.toggle('collapsed')
+    }
   }
   el.addEventListener('click', mdBodyClickHandler)
 }
@@ -190,6 +249,41 @@ function bindMdBodyClick(): void {
 function toggle(n: number): void {
   if (props.activeIndex === n) emit('update:activeIndex', -1)
   else emit('update:activeIndex', n)
+}
+
+// 把 mermaid SVG 导出为 PNG 并触发下载
+function downloadMermaidSvg(svgEl: SVGElement, title: string): void {
+  const clone = svgEl.cloneNode(true) as SVGElement
+  // 补上 viewBox / 宽高，避免导出空白
+  const bbox = svgEl.getBoundingClientRect()
+  if (!clone.getAttribute('width')) clone.setAttribute('width', String(bbox.width || 600))
+  if (!clone.getAttribute('height')) clone.setAttribute('height', String(bbox.height || 400))
+  const svgData = new XMLSerializer().serializeToString(clone)
+  const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const img = new Image()
+  img.onload = () => {
+    const canvas = document.createElement('canvas')
+    const scale = 2 // 2x 高清
+    canvas.width = (bbox.width || 600) * scale
+    canvas.height = (bbox.height || 400) * scale
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    URL.revokeObjectURL(url)
+    canvas.toBlob((pngBlob) => {
+      if (!pngBlob) return
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(pngBlob)
+      a.download = `${title}.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+    }, 'image/png')
+  }
+  img.onerror = () => URL.revokeObjectURL(url)
+  img.src = url
 }
 
 // 5) Mermaid rendering on mount + on every content change.
@@ -200,20 +294,68 @@ async function ensureMermaid(): Promise<void> {
   mermaidReady = true
 }
 
+// LLM 生成 mermaid 时常见的两类语法小错会导致整张图回退成文字：
+//  1) 一行写多条连线（"H --> K     K --> S"）——mermaid 要求一行一条语句
+//  2) 源码里混入 ``` 围栏残留（如末尾 "T --> U```"）
+// 这里在渲染前做保守修复：去反引号、把同行的后续语句前插入 ';'（官方分隔符）。
+function repairMermaidSource(src: string): string {
+  const s = src.replace(/```+/g, '').replace(/\r\n/g, '\n')
+  const ARROW = '(?:-->|==>|-\\.->|--o|--x|->>|-->>|->)'
+  const stmtStart = new RegExp(
+    '[A-Za-z0-9_\\u4e00-\\u9fff][\\w\\u4e00-\\u9fff"-]*' + // 节点 ID
+    '\\s*(?:\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\})?' +     // 可选形状 [..]/(..)/{..}
+    '\\s*' + ARROW
+  )
+  const lines = s.split('\n').map((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('%%')) return line
+    const arrows = line.match(/--?>|==>|-\.->|--o|--x|->>|-->>/g)
+    if (!arrows || arrows.length < 2) return line
+    // 语句边界：非行首的空白段，其后紧跟「节点ID + 可选形状 + 箭头」→ 替换为 '; '
+    return line.replace(
+      new RegExp('(?<=\\S)\\s+(?=' + stmtStart.source + ')', 'g'),
+      '; ',
+    )
+  })
+  return lines.join('\n').trim()
+}
+
 async function renderMermaidIn(root: HTMLElement): Promise<void> {
   const blocks = Array.from(root.querySelectorAll<HTMLElement>('.mermaid-block:not([data-rendered])'))
   for (const block of blocks) {
     const source = decodeURIComponent(block.getAttribute('data-source') || block.textContent || '')
-    const id = 'mmd-' + Math.random().toString(36).slice(2, 10)
+    const renderOnce = async (code: string) => {
+      const id = 'mmd-' + Math.random().toString(36).slice(2, 10)
+      const { svg } = await mermaid.render(id, code)
+      return svg
+    }
+    const paintSvg = (svg: string) => {
+      // 强制 SVG 背景透明，适配暗色主题
+      const svgClean = svg.replace(/<rect[^>]*fill="[^"]*"[^>]*\/>/g, '')
+        .replace(/fill="#fff[^"]*"/g, 'fill="transparent"')
+        .replace(/fill="#ffffff[^"]*"/g, 'fill="transparent"')
+      block.innerHTML = svgClean
+      block.setAttribute('data-rendered', '1')
+    }
     try {
-      const { svg } = await mermaid.render(id, source)
-      block.innerHTML = svg
-      block.setAttribute('data-rendered', '1')
-    } catch (e) {
-      // Fall back to a plain code block so the raw source is still visible.
-      block.classList.remove('mermaid-block')
-      block.innerHTML = '<pre><code class="language-mermaid">' + escapeHtml(source) + '</code></pre>'
-      block.setAttribute('data-rendered', '1')
+      paintSvg(await renderOnce(source))
+    } catch {
+      // 原文解析失败：尝试修复语法后重试一次
+      try {
+        const repaired = repairMermaidSource(source)
+        if (repaired && repaired !== source.trim()) {
+          paintSvg(await renderOnce(repaired))
+          // 修复成功：同步 data-source，让「复制源码」拿到可直接渲染的版本
+          block.setAttribute('data-source', encodeURIComponent(repaired))
+          continue
+        }
+        throw new Error('repair no-op')
+      } catch {
+        // 仍然失败：回退为普通代码块，保证源码可见
+        block.classList.remove('mermaid-block')
+        block.innerHTML = '<pre><code class="language-mermaid">' + escapeHtml(source) + '</code></pre>'
+        block.setAttribute('data-rendered', '1')
+      }
     }
   }
 }
@@ -394,6 +536,81 @@ onBeforeUnmount(() => {
 .md-body :deep(.mermaid-block[data-rendered] svg) {
   max-width: 100%;
   height: auto;
+}
+
+/* Mermaid 卡片：独立区域 + 标题栏 + 右上角操作按钮 */
+.md-body :deep(.mermaid-card) {
+  margin: 16px 0;
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.25));
+  border-radius: 12px;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.03));
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.md-body :deep(.mermaid-card:hover) {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+.md-body :deep(.mermaid-card-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border-bottom: 1px solid var(--border-soft, rgba(128, 128, 128, 0.2));
+  cursor: pointer;
+  user-select: none;
+}
+.md-body :deep(.mermaid-card-title) {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #222);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.md-body :deep(.mermaid-card-title)::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  background: var(--accent, #3b82f6);
+  border-radius: 2px;
+}
+.md-body :deep(.mermaid-card-toolbar) {
+  display: flex;
+  gap: 4px;
+}
+.md-body :deep(.mermaid-action) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.md-body :deep(.mermaid-action:hover) {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent, #3b82f6);
+}
+.md-body :deep(.mermaid-card-body) {
+  padding: 16px;
+  overflow-x: auto;
+  transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+}
+.md-body :deep(.mermaid-card.collapsed .mermaid-card-body) {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.md-body :deep(.mermaid-card.collapsed .mermaid-action[data-action="toggle"] svg) {
+  transform: rotate(180deg);
 }
 
 .think-section {

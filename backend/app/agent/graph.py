@@ -82,6 +82,7 @@ def _build_workflow() -> StateGraph:
   g.add_conditional_edges("router", route_by_intent, {
     "chat": "retrieve",
     "chat_no_rag": END,
+    "clarify": END,               # 歧义澄清：图先终止，chat.py 拦截并等用户回答后带 skip_clarify 重跑
     "research": "planner",       # 任务规划：复杂问题先分解再检索
     "ingest": "ingest",
     "report": "report",

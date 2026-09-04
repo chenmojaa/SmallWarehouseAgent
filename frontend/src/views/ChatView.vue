@@ -11,7 +11,6 @@ import ThinkingIndicator from '@/components/ThinkingIndicator.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import CitationPreview from '@/components/CitationPreview.vue'
 import IngestResultCard from '@/components/IngestResultCard.vue'
-import PlanApprovalCard from '@/components/PlanApprovalCard.vue'
 
 const chat = useChatStore()
 const sessions = useSessionsStore()
@@ -21,6 +20,23 @@ const route = useRoute()
 
 const input = ref("")
 const scrollRef = ref<HTMLElement | null>(null)
+
+// === 歧义澄清弹窗（模型驱动，无需开关）===
+const clarifyInput = ref("")
+// 「其他：___」行内的输入框实例，用于点击整行时聚焦
+const clarifyOtherEl = ref<InstanceType<typeof NInput> | null>(null)
+watch(() => chat.pendingClarify, (p) => { if (p) clarifyInput.value = "" })
+function submitClarify() {
+  const v = clarifyInput.value.trim()
+  if (!v) return
+  chat.answerClarify(v)
+}
+function onClarifyKey(e: KeyboardEvent) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault()
+    submitClarify()
+  }
+}
 
 // Agent 本地访问权限模式下拉选项：完全访问为红色警示
 const permissionOptions = computed(() => [
@@ -140,17 +156,6 @@ function onKey(e: KeyboardEvent) {
           >
             <span>Plan</span>
           </button>
-          <button
-            type="button"
-            class="plan-toggle"
-            :class="{ on: chat.planApproval }"
-            :title="chat.planApproval
-              ? t('chat.planApproval.tip.on', '计划审批已开启：研究任务先生成计划，你确认后才执行', 'Plan approval ON: research tasks wait for your review before running')
-              : t('chat.planApproval.tip.off', '计划审批已关闭：计划自动执行', 'Plan approval OFF: plans run automatically')"
-            @click="chat.togglePlanApproval()"
-          >
-            <span>{{ t('chat.planApproval.toggle', '审批', 'Approve') }}</span>
-          </button>
           <div class="rag-group">
             <span class="rag-label">{{ t('nav.notes', '知识库', 'Knowledge Base') }}</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
@@ -190,16 +195,6 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
-          <!-- HITL 计划审批卡片：待批准/已取消（approved 后由 plan-strip 接管） -->
-          <PlanApprovalCard
-            v-if="m.role === 'assistant' && m.planApproval && m.planApproval.status !== 'approved'"
-            :summary="m.planApproval.summary"
-            :steps="m.planApproval.steps"
-            :status="m.planApproval.status"
-            :disabled="chat.isStreaming"
-            @run="(steps: string[]) => chat.approvePlan(m.id, steps, m.planApproval?.summary || '')"
-            @cancel="chat.cancelPlan(m.id)"
-          />
           <!-- 任务规划进度条：计划步骤 pending/running/done + 命中数 -->
           <div v-if="m.role === 'assistant' && m.planSteps && m.planSteps.length" class="plan-strip">
             <div class="plan-head">
@@ -306,17 +301,6 @@ function onKey(e: KeyboardEvent) {
           >
             <span>Plan</span>
           </button>
-          <button
-            type="button"
-            class="plan-toggle"
-            :class="{ on: chat.planApproval }"
-            :title="chat.planApproval
-              ? t('chat.planApproval.tip.on', '计划审批已开启：研究任务先生成计划，你确认后才执行', 'Plan approval ON: research tasks wait for your review before running')
-              : t('chat.planApproval.tip.off', '计划审批已关闭：计划自动执行', 'Plan approval OFF: plans run automatically')"
-            @click="chat.togglePlanApproval()"
-          >
-            <span>{{ t('chat.planApproval.toggle', '审批', 'Approve') }}</span>
-          </button>
           <div class="rag-group">
             <span class="rag-label">{{ t('nav.notes', '知识库', 'Knowledge Base') }}</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
@@ -362,6 +346,39 @@ function onKey(e: KeyboardEvent) {
         <n-button type="primary" @click="chat.resolvePermission(true)">{{ t('chat.perm.dialog.allow', '允许本次访问', 'Allow this time') }}</n-button>
       </div>
       <p class="perm-dialog-hint">{{ t('ui.misc.020', '如不想每次确认，可在输入框下方开启「完全访问」权限', '如不想每次确认，可在输入框下方开启「完全访问」权限') }}</p>
+    </div>
+  </n-modal>
+
+  <!-- 歧义澄清弹窗：router 判定问题有歧义（如"调研哪吒"）时模型主动追问 -->
+  <n-modal :show="!!chat.pendingClarify" @update:show="(v: boolean) => { if (!v) chat.answerClarify('') }" :mask-closable="false">
+    <div v-if="chat.pendingClarify" class="perm-dialog clarify-dialog">
+      <h3 class="perm-dialog-title">{{ t('chat.clarify.title', '想确认一下你的意思', 'Quick question') }}</h3>
+      <p class="perm-dialog-desc clarify-question">{{ chat.pendingClarify.question }}</p>
+      <div class="clarify-options">
+        <button
+          v-for="opt in chat.pendingClarify.options"
+          :key="opt"
+          type="button"
+          class="clarify-option"
+          @click="chat.answerClarify(opt)"
+        >{{ opt }}</button>
+        <!-- 最后一项：其他 + 内联输入框，点击整行即可聚焦 -->
+        <div class="clarify-other" @click="clarifyOtherEl?.focus()">
+          <span class="clarify-other-label">{{ t('chat.clarify.other', '其他', 'Other') }}：</span>
+          <n-input
+            ref="clarifyOtherEl"
+            v-model:value="clarifyInput"
+            :bordered="false"
+            class="clarify-other-input"
+            :placeholder="t('chat.clarify.placeholder', '补充说明…', 'Type your own answer…')"
+            @keydown="onClarifyKey"
+          />
+        </div>
+      </div>
+      <div class="perm-dialog-actions">
+        <n-button @click="chat.answerClarify('')">{{ t('chat.clarify.skip', '跳过，直接回答', 'Skip and answer') }}</n-button>
+        <n-button type="primary" :disabled="!clarifyInput.trim()" @click="submitClarify">{{ t('chat.clarify.submit', '发送', 'Send') }}</n-button>
+      </div>
     </div>
   </n-modal>
 
@@ -477,6 +494,58 @@ function onKey(e: KeyboardEvent) {
 .perm-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
 .perm-dialog-actions :deep(.n-button) { border-radius: 10px; }
 .perm-dialog-hint { margin: 0; font-size: 11px; color: var(--text-muted, #aaa); text-align: center; }
+
+/* 歧义澄清弹窗：问题加粗居中 + 选项纵向排列，末行为「其他：___」内联输入 */
+.clarify-question { font-size: 14px; color: var(--text-primary, #222); font-weight: 500; }
+.clarify-options {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.clarify-option {
+  width: 100%;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 13px; line-height: 20px;
+  text-align: left;
+  color: var(--text-secondary, #888);
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.3));
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.clarify-option:hover {
+  color: var(--brand-blue, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.08);
+}
+/* 「其他：______」行：外观与选项一致，内嵌无边框输入框，聚焦时整行高亮 */
+.clarify-other {
+  display: flex; align-items: center; gap: 4px;
+  width: 100%;
+  padding: 4px 12px 4px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.3));
+  background: transparent;
+  cursor: text;
+  transition: border-color 0.15s, background 0.15s;
+}
+.clarify-other:focus-within {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.06);
+}
+.clarify-other-label {
+  flex: none;
+  font-size: 13px; line-height: 20px;
+  color: var(--text-secondary, #888);
+}
+.clarify-other-input {
+  flex: 1; min-width: 0;
+}
+.clarify-other-input :deep(.n-input .n-input__input-el) {
+  font-size: 13px;
+  border-radius: 8px;
+  background: transparent;
+}
+.clarify-other-input :deep(.n-input) { background: transparent; }
 
 /* 工具调用进度条：助手消息上方的 MCP/技能工具状态 chips */
 .tool-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }

@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia'
-import { chatStream, planPreview, respondPermission, stripThink, type ChatMessage, type ChatRequest, type Citation, type IngestResult, type ReportResult, type ToolEvent, type PermissionEvent, type PlanStepItem, type PlanEvent } from '@/api/chat'
+import { chatStream, respondClarify, respondPermission, stripThink, type ChatMessage, type ChatRequest, type Citation, type ClarifyEvent, type IngestResult, type ReportResult, type ToolEvent, type PermissionEvent, type PlanStepItem, type PlanEvent } from '@/api/chat'
 import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
-import { getApiKey } from '@/api/client'
 
 export interface ToolCallItem {
   name: string
@@ -17,11 +16,11 @@ export interface PendingPermission {
   args: unknown
 }
 
-/** HITL 计划审批卡片状态：pending=待用户批准；approved=已批准执行中；cancelled=已取消 */
-export interface PlanApprovalState {
-  status: 'pending' | 'approved' | 'cancelled'
-  summary: string
-  steps: string[]
+/** 歧义澄清弹窗数据：router 判定问题有歧义时经 SSE clarify 事件下发 */
+export interface PendingClarify {
+  requestId: string
+  question: string
+  options: string[]
 }
 
 interface Msg extends ChatMessage {
@@ -34,8 +33,6 @@ interface Msg extends ChatMessage {
   // 任务规划：计划摘要 + 步骤执行状态（plan-strip 渲染）
   planSummary?: string
   planSteps?: PlanStepItem[]
-  // HITL 计划审批：待批准的计划卡片（仅内存，不入库）
-  planApproval?: PlanApprovalState
 }
 export interface PipelineStage {
   stage: "router" | "rag_search" | "llm_stream" | "agent"
@@ -62,8 +59,6 @@ interface State {
   useRag: boolean
   // 任务规划开关：research 意图先分解子查询再检索（localStorage 持久化）
   usePlanner: boolean
-  // HITL 计划审批开关：研究意图先出计划卡片，用户批准/编辑后才执行（localStorage 持久化）
-  planApproval: boolean
   abortCtl: AbortController | null
   streamingSessionId: string | null
   streamingMessageId: string | null
@@ -81,7 +76,8 @@ interface State {
   agentPermission: 'default' | 'full'
   // 当前待用户批准的权限请求（弹窗数据）
   pendingPermission: PendingPermission | null
-  _torn: boolean
+  // 当前待用户回答的歧义澄清（弹窗数据；模型驱动，始终开启）
+  pendingClarify: PendingClarify | null
 }
 
 export const useChatStore = defineStore("chat", {
@@ -95,9 +91,6 @@ export const useChatStore = defineStore("chat", {
     usePlanner: ((): boolean => {
       try { return localStorage.getItem('planner-disabled') !== '1' } catch { return true }
     })(),
-    planApproval: ((): boolean => {
-      try { return localStorage.getItem('plan-approval') === '1' } catch { return false }
-    })(),
     abortCtl: null,
     streamingSessionId: null,
     streamingMessageId: null,
@@ -108,7 +101,7 @@ export const useChatStore = defineStore("chat", {
       try { return localStorage.getItem('agent-permission') === 'full' ? 'full' : 'default' } catch { return 'default' }
     })(),
     pendingPermission: null,
-    _torn: false,
+    pendingClarify: null,
   }),
   getters: {
     streamingHere: (s): boolean => s.isStreaming && s.streamingSessionId !== null && s.streamingSessionId === s.sessionId,
@@ -116,7 +109,6 @@ export const useChatStore = defineStore("chat", {
   actions: {
     toggleRag() { this.useRag = !this.useRag },
     abortStream() {
-      this._torn = true
       this.abortCtl?.abort()
       this.abortCtl = null
     },
@@ -125,13 +117,6 @@ export const useChatStore = defineStore("chat", {
       try {
         if (this.usePlanner) localStorage.removeItem('planner-disabled')
         else localStorage.setItem('planner-disabled', '1')
-      } catch { /* localStorage 不可用时仅内存生效 */ }
-    },
-    togglePlanApproval() {
-      this.planApproval = !this.planApproval
-      try {
-        if (this.planApproval) localStorage.setItem('plan-approval', '1')
-        else localStorage.removeItem('plan-approval')
       } catch { /* localStorage 不可用时仅内存生效 */ }
     },
     setAgentPermission(mode: 'default' | 'full') {
@@ -148,7 +133,24 @@ export const useChatStore = defineStore("chat", {
       this.pendingPermission = null
       try { await respondPermission(p.requestId, approve) } catch {}
     },
-    /** 构造 /chat 请求 payload；extra 用于审批批准时附加 plan_override */
+    // 用户回答歧义澄清：点选项 / 自由输入；空串=跳过按原问题继续。
+    // SSE 流仍保持打开，服务端拿到答案后继续同一条流。
+    async answerClarify(answer: string) {
+      const p = this.pendingClarify
+      if (!p) return
+      this.pendingClarify = null
+      // 瞬时失败（启动期 401 等）重试一次，否则服务端会白等 300s 超时
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await respondClarify(p.requestId, answer)
+          return
+        } catch (e) {
+          if (attempt === 1) console.warn('clarify answer failed:', e)
+          else await new Promise(r => setTimeout(r, 600))
+        }
+      }
+    },
+    /** 构造 /chat 请求 payload */
     _buildPayload(text: string, extra?: Partial<ChatRequest>): ChatRequest {
       const models = useModelsStore()
       const sel = models.selected
@@ -163,7 +165,9 @@ export const useChatStore = defineStore("chat", {
         use_planner: this.usePlanner,
         session_id: this.sessionId,
         base_url: sel?.baseUrl ?? null,
-        api_key: (sel?.apiKey && !sel.apiKey.includes('*')) ? sel.apiKey : (getApiKey() || null),
+        // 列表接口返回的 apiKey 是脱敏值（sk****xx），回传会覆盖服务端原始
+        // key 导致上游 401（MiniMax 1004 login fail）——脱敏值一律不发送
+        api_key: sel?.apiKey && !sel.apiKey.includes('*') ? sel.apiKey : null,
         reasoning_level: sel?.reasoning ?? null,
         embedding_model: sel?.embeddingModel ?? null,
         embedding_base_url: sel?.baseUrl ?? null,
@@ -171,16 +175,7 @@ export const useChatStore = defineStore("chat", {
         ...extra,
       }
     },
-    /** 清空流式状态（HITL preview 挂起时恢复输入框交互） */
-    _endStreaming() {
-      this.isStreaming = false
-      this.streamingSessionId = null
-      this.streamingMessageId = null
-      this.abortCtl = null
-      this.stage = null
-      this.thinking = false
-    },
-    /** 消费 /chat SSE 流并更新 asstMsg（send 与 approvePlan 共用） */
+    /** 消费 /chat SSE 流并更新 asstMsg */
     async _runStream(asstMsg: Msg, payload: ChatRequest) {
       const sessions = useSessionsStore()
 
@@ -242,6 +237,8 @@ export const useChatStore = defineStore("chat", {
           } else if (ev.type === 'delta' && typeof ev.data === 'string') {
             feed(ev.data)
             flushBubble()
+            // 服务端已开始输出（澄清超时被跳过等场景）：关掉仍挂着的澄清弹窗
+            if (this.pendingClarify) this.pendingClarify = null
           } else if (ev.type === 'stage' && ev.data && typeof ev.data === 'object') {
             this.stage = { ...(ev.data as PipelineStage), at: Date.now() }
           } else if (ev.type === 'tool' && ev.data && typeof ev.data === 'object') {
@@ -269,8 +266,6 @@ export const useChatStore = defineStore("chat", {
               asstMsg.planSteps = p.queries.map(q => ({ query: q, status: 'pending' as const }))
               // 计划生成后第一步立即视为执行中
               if (asstMsg.planSteps.length) asstMsg.planSteps[0].status = 'running'
-              // HITL：审批卡片 -> 进度条过渡（approvePlan 已清，这里兜底防重复渲染）
-              if (asstMsg.planApproval) asstMsg.planApproval = undefined
             } else if (p.phase === 'step_done' && asstMsg.planSteps && typeof p.index === 'number') {
               const st = asstMsg.planSteps[p.index]
               if (st) { st.status = 'done'; st.hits = p.hits ?? 0 }
@@ -301,6 +296,14 @@ export const useChatStore = defineStore("chat", {
               }
             } else if (p.phase === 'result') {
               this.pendingPermission = null
+            }
+          } else if (ev.type === 'clarify' && ev.data && typeof ev.data === 'object') {
+            // 歧义澄清（模型驱动）：弹窗让用户选含义 / 补充说明 / 跳过
+            const c = ev.data as ClarifyEvent
+            this.pendingClarify = {
+              requestId: c.request_id,
+              question: c.question || '',
+              options: Array.isArray(c.options) ? c.options : [],
             }
           } else if (ev.type === 'citations' && Array.isArray(ev.data)) {
             asstMsg.citations = ev.data as Citation[]
@@ -346,18 +349,13 @@ export const useChatStore = defineStore("chat", {
         this.thinking = false
         this.streamingSnapshot = null
         this.pendingPermission = null
+        this.pendingClarify = null
       }
     },
     async send(text: string) {
       if (!text.trim()) return
       if (this.isStreaming) return
       if (this.streamingSessionId !== null && this.streamingSessionId === this.sessionId) return
-      // 旧的 pending 审批卡片自动取消（新一轮对话开始）
-      for (const m of this.messages) {
-        if (m.planApproval?.status === 'pending') {
-          m.planApproval.status = 'cancelled'
-        }
-      }
       const userMsg: Msg = { id: 'u-' + String(Date.now()), role: 'user', content: text }
       const asstMsg: Msg = { id: 'a-' + String(Date.now() + 1), role: 'assistant', content: '' }
       this.messages.push(userMsg, asstMsg)
@@ -366,78 +364,11 @@ export const useChatStore = defineStore("chat", {
       this.streamingMessageId = asstMsg.id
       this.error = null
       this.stage = null
-      this._torn = false
       this.abortCtl = new AbortController()
 
-      const payload = this._buildPayload(text)
-
-      // HITL 计划审批关闭：行为与原来完全一致
-      if (!this.planApproval) {
-        await this._runStream(asstMsg, payload)
-        return
-      }
-
-      // 阶段 1：只读预览计划（router + planner），不写会话
-      try {
-        const res = await planPreview(payload, this.abortCtl?.signal)
-        if (!res.needs_plan || !res.steps?.length) {
-          // 非研究意图 / 规划失败：走正常流（无 override）
-          await this._runStream(asstMsg, payload)
-          return
-        }
-        // 计划待审批：挂起卡片，恢复输入框交互
-        asstMsg.planApproval = { status: 'pending', summary: res.plan_summary || '', steps: res.steps }
-        const idx = this.messages.findIndex(m => m.id === asstMsg.id)
-        if (idx >= 0) this.messages[idx] = { ...asstMsg }
-        this._endStreaming()
-      } catch (e) {
-        if (this.abortCtl?.signal.aborted) {
-          this._endStreaming()
-          return
-        }
-        // preview 失败：降级为无审批的正常流（规划永不阻塞主流程）
-        await this._runStream(asstMsg, payload)
-      }
-    },
-    /** HITL 阶段 2：用户批准（可编辑后）计划，带 plan_override 走正常 SSE 流 */
-    async approvePlan(msgId: string, steps: string[], summary: string) {
-      if (this.isStreaming) return
-      const i = this.messages.findIndex(m => m.id === msgId)
-      if (i < 0) return
-      const msg = this.messages[i]
-      if (msg.planApproval?.status !== 'pending') return
-      const cleaned = steps.map(s => s.trim()).filter(Boolean)
-      if (!cleaned.length) return
-      // 配对的用户消息（assistant 前一条 user）
-      const prev = this.messages[i - 1]
-      if (!prev || prev.role !== 'user') return
-
-      // 卡片 -> 进度条过渡
-      msg.planApproval = undefined
-      this.messages[i] = { ...msg }
-      // 恢复流式状态
-      this.isStreaming = true
-      this.streamingSessionId = this.sessionId
-      this.streamingMessageId = msgId
-      this.error = null
-      this.stage = null
-      this._torn = false
-      this.abortCtl = new AbortController()
-
-      const payload = this._buildPayload(prev.content, {
-        use_planner: true,
-        plan_override: { summary, steps: cleaned },
-      })
-      await this._runStream(msg, payload)
-    },
-    /** HITL：取消待审批的计划（保留用户消息和已取消卡片，本轮不入库） */
-    cancelPlan(msgId: string) {
-      const i = this.messages.findIndex(m => m.id === msgId)
-      if (i < 0) return
-      const msg = this.messages[i]
-      if (msg.planApproval?.status !== 'pending') return
-      msg.planApproval.status = 'cancelled'
-      this.messages[i] = { ...msg }
+      // 单段式流：router 内联做歧义检测，需要澄清时经 SSE clarify 事件
+      // 弹窗追问，用户回答后同一条流继续（无需两段式 preview + override）。
+      await this._runStream(asstMsg, this._buildPayload(text))
     },
     async loadFromSession(sessionId: string) {
       const token = ++this.loadToken

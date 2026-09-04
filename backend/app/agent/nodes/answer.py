@@ -11,11 +11,12 @@ Two entry points are kept on purpose:
     is on AND there is at least one registered tool (skills or MCP), we bind
     the tools to the chat model and run a tool-call loop:
 
-      1. invoke the model with the current message list
-      2. if the response has ``tool_calls`` -> execute them, append a
+      1. stream the model with the current message list (token 级 text_delta)
+      2. if the response carries ``tool_calls`` -> execute them, append a
          ``ToolMessage`` for each, continue
-      3. the first response *without* tool_calls is the final answer; we emit
-         the body as one ``text_delta`` event and yield ``done`` with citations
+      3. the first response *without* tool_calls is the final answer; its
+         body has already been streamed out as ``text_delta`` events, so we
+         finish with a ``done`` event carrying citations
 
     A small capability inventory is appended to the answer system prompt so the
     model knows which MCP servers / skills exist without having to call the
@@ -23,7 +24,10 @@ Two entry points are kept on purpose:
 """
 from __future__ import annotations
 
+import json
 import re
+
+from langchain_core.messages import AIMessage
 
 from app.llm.factory import _build_model
 from app.agent.state import AgentState
@@ -32,8 +36,6 @@ from app.agent.context import build_messages
 from app.agent.tools import load_tools, inventory_text
 from app.config import settings
 
-
-ANSWER_INSTRUCTIONS = get_answer_instructions()
 
 _CITE_RE = re.compile(r"\[\s*(\d+)\s*\]")
 
@@ -86,7 +88,9 @@ def _build_messages(state: AgentState):
     except Exception:
       pass
   msgs = build_messages(
-    instructions=ANSWER_INSTRUCTIONS,
+    # Read per-request (mtime-cached) so config.yaml prompt edits hot-reload
+    # without a backend restart; a module-level constant froze the YAML.
+    instructions=get_answer_instructions(),
     chunks=chunks,
     history=history,
     question=question,
@@ -127,11 +131,102 @@ def _citations_from_text(text: str, chunks: list) -> list:
   return out
 
 
-def _tool_by_name(tools, name: str):
+def _tool_by_name(tools, name):
   for t in tools:
     if getattr(t, "name", None) == name:
       return t
   return None
+
+
+class _ToolStreamAgg:
+  """聚合一次带工具绑定模型的流式响应。
+
+  - 文本增量随到随吐（add 返回待转发的 delta），实现 token 级流式；
+  - tool_call 分片按 index 聚合，流结束后统一 json.loads 出完整参数；
+  - 一旦出现 tool_call 分片即停止转发文本，避免工具调用前后的杂讯
+    泄漏进最终回答。
+  """
+
+  def __init__(self):
+    self.text = ""
+    self.tool_calls: list[dict] = []
+    self._agg: dict[int, dict] = {}
+    self._saw_tool = False
+    self._last_idx: int | None = None
+
+  def add(self, chunk) -> str:
+    """喂入一个 AIMessageChunk，返回应转发给用户的文本增量（可为 ''）。"""
+    tccs = list(getattr(chunk, "tool_call_chunks", None) or [])
+    # 部分供应商直接给解析好的完整 tool_calls（无分片）
+    parsed = list(getattr(chunk, "tool_calls", None) or [])
+    if tccs or parsed:
+      self._saw_tool = True
+    for tcc in tccs:
+      get = tcc.get if isinstance(tcc, dict) else (lambda k, d=None: getattr(tcc, k, d))
+      idx = get("index")
+      if idx is None:
+        # 无 index 的分片视为上一个调用的续传（部分供应商不回传 index）
+        idx = self._last_idx if self._last_idx is not None else 0
+      else:
+        self._last_idx = idx
+      entry = self._agg.setdefault(idx, {"name": "", "args": "", "id": ""})
+      if get("name"):
+        entry["name"] += get("name")
+      if get("args"):
+        entry["args"] += get("args")
+      if get("id"):
+        entry["id"] = get("id")
+    for tc in parsed:
+      # langchain 会从单个流式分片派生 parsed tool_calls：name 只在首个分片
+      # 出现时，后续 args 分片派生出空名条目；且与 _agg 分片聚合重复。
+      # 空名/重复条目进入 AIMessage(tool_calls=...) 历史后回传上游，会触发
+      # MiniMax 400 invalid tool calls count (2013)。parsed 仅在供应商完全
+      # 不发原始分片（直接给完整调用）时才可信。
+      if tccs:
+        break
+      name = (tc.get("name") or "").strip()
+      if not name:
+        continue
+      if self._has_call(name, tc.get("id") or ""):
+        continue
+      self.tool_calls.append({
+        "name": name,
+        "args": tc.get("args") or {},
+        "id": tc.get("id") or "",
+      })
+    content = getattr(chunk, "content", "") or ""
+    if content and not self._saw_tool:
+      delta = _coerce(content)
+      self.text += delta
+      return delta
+    return ""
+
+  def _has_call(self, name: str, call_id: str) -> bool:
+    """判断某工具调用是否已收集（按 id 精确匹配，无 id 时按名匹配）。"""
+    for t in self.tool_calls:
+      if call_id and (t.get("id") or "") == call_id:
+        return True
+      if not call_id and t.get("name") == name:
+        return True
+    return False
+
+  def finish(self) -> list[dict]:
+    """流结束后解析聚合出的 tool_calls（可多次调用，幂等）。"""
+    for i in sorted(self._agg):
+      e = self._agg[i]
+      if not e["name"]:
+        continue
+      try:
+        args = json.loads(e["args"]) if e["args"] else {}
+      except Exception:
+        args = {}
+      # 与 parsed 通道（若供应商混发两种形态）按 id/名去重，避免同一调用
+      # 被执行两次并回传重复历史。
+      if self._has_call(e["name"], e["id"]):
+        continue
+      self.tool_calls.append({"name": e["name"], "args": args, "id": e["id"]})
+    self._agg.clear()
+    return self.tool_calls
 
 
 def answer_node(state: AgentState) -> dict:
@@ -154,8 +249,9 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
 
   Tool-calling path: when tools are available we bind them and run a tool-call
   loop. ``tool_call`` and ``tool_result`` SSE events surface every invocation
-  (the frontend can ignore them silently). The first non-tool-call response is
-  emitted as a single ``text_delta`` event followed by ``done``.
+  (the frontend can ignore them silently). Every model turn is streamed
+  (``astream``): the final answer arrives as incremental ``text_delta``
+  events, followed by ``done`` with citations.
 
   ``instructions_override`` lets sub-agents (app/agent/subagents.py)
   substitute the default system prompt with their profile-specific text.
@@ -184,23 +280,31 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
     max_steps = max(1, int(getattr(settings, "tools_max_steps", 4) or 4))
 
     for _step in range(max_steps):
+      agg = _ToolStreamAgg()
       try:
-        resp = await bound.ainvoke(msgs)
+        async for chunk in bound.astream(msgs):
+          delta = agg.add(chunk)
+          if delta:
+            yield ("text_delta", delta)
       except Exception as e:
         yield ("error", "%s: %s" % (type(e).__name__, e))
         return
 
-      tcs = list(getattr(resp, "tool_calls", None) or [])
+      tcs = agg.finish()
       if not tcs:
-        full_text = _coerce(getattr(resp, "content", ""))
-        if full_text:
-          yield ("text_delta", full_text)
+        full_text = agg.text
         break
+      # 上游（MiniMax 2013）要求 assistant.tool_calls[].id 非空且与后续
+      # ToolMessage 一一对应；供应商漏发 id 时补一个稳定值。
+      for _i, _tc in enumerate(tcs):
+        if not (_tc.get("id") or "").strip():
+          _tc["id"] = "call_s%d_%d" % (_step, _i)
 
       yield ("tool_calls_batch", {
         "count": len(tcs),
         "names": [tc.get("name") for tc in tcs],
       })
+      resp = AIMessage(content=agg.text, tool_calls=tcs)
       msgs = msgs + [resp]
       executed_any = False
       for tc in tcs:
@@ -271,11 +375,13 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
       ))] if executed_any else msgs
     else:
       # ran out of steps without a text answer; force one last pass
+      agg = _ToolStreamAgg()
       try:
-        resp = await bound.ainvoke(msgs)
-        full_text = _coerce(getattr(resp, "content", ""))
-        if full_text:
-          yield ("text_delta", full_text)
+        async for chunk in bound.astream(msgs):
+          delta = agg.add(chunk)
+          if delta:
+            yield ("text_delta", delta)
+        full_text = agg.text
       except Exception as e:
         yield ("error", "%s: %s" % (type(e).__name__, e))
         return

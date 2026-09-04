@@ -82,7 +82,6 @@ class ChatRequest(BaseModel):
   embedding_base_url: str | None = None
   agent_permission: str = "default"   # default=本地访问需询问 | full=完全访问
   use_planner: bool | None = None     # None=跟随服务端 HD_PLANNER_ENABLED；true/false=本轮强制开/关
-  plan_override: PlanOverride | None = None  # HITL 计划审批：已批准的计划（阶段 2 传入）
   subagent: str | None = None         # Optional sub-agent profile (explore|plan|general) to dispatch in parallel with the main answer.
 
 
@@ -91,10 +90,10 @@ class PermissionDecision(BaseModel):
   approve: bool
 
 
-class PlanOverride(BaseModel):
-  """HITL 计划审批：用户批准/编辑后的计划，planner 直接采用（跳过 LLM 规划）。"""
-  summary: str = ""
-  steps: list[str] = []
+class ClarifyDecision(BaseModel):
+  """用户对歧义澄清弹窗的回答：点选项或自由输入，空串=跳过。"""
+  request_id: str
+  answer: str = ""
 
 
 def _extract_query(messages):
@@ -216,14 +215,10 @@ def _build_initial_state(body: ChatRequest, query: str, session_id: str,
     "citations": [],
     "agent_permission": (body.agent_permission or "default").lower(),
     "use_planner": body.use_planner,
-    # HITL 计划审批：每轮显式重置（checkpointer 泄露防护）；
-    # 有已批准计划时规范化后注入，planner 检测到即跳过 LLM 规划。
-    "plan_override": (
-        {
-            "summary": (body.plan_override.summary or "").strip(),
-            "steps": [str(s).strip() for s in body.plan_override.steps if str(s).strip()],
-        }
-        if (body.plan_override and body.plan_override.steps) else None    ),
+    # 歧义澄清：每轮显式重置（checkpointer 泄露防护）；
+    # skip_clarify 只在拿到用户回答后的二次执行中由 chat.py 置 True。
+    "clarify_request": None,
+    "skip_clarify": False,
     "subagent_mode": body.subagent,
   }
 
@@ -236,69 +231,12 @@ async def resolve_permission(body: PermissionDecision):
   return {"ok": ok}
 
 
-@router.post("/chat/plan-preview")
-def plan_preview(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-API-Key")):
-  """HITL 计划审批阶段 1：只跑 router + planner 生成计划草案，等待用户批准。
-
-  只读端点：不写 DB、不建 session、不触碰 MCP 全局状态——
-  用户取消审批时这一轮对话不留任何痕迹；批准后阶段 2 走正常 /chat 流程。
-  """
-  if not settings.use_graph:
-    return {"needs_plan": False, "intent": "chat", "plan_summary": "", "steps": []}
-  if not body.messages:
-    raise HTTPException(status_code=400, detail="messages is empty")
-
-  query = _extract_query(body.messages)
-  if not query:
-    raise HTTPException(status_code=400, detail="no user message content")
-
-  api_key = (body.api_key or x_api_key or "").strip() or None
-  base_url = (body.base_url or "").strip() or None
-
-  from app.agent.nodes.router import router_node
-  from app.agent.nodes.planner import planner_node
-
-  history = get_messages(body.session_id, limit=16) if body.session_id else []
-  state = {
-    "messages": [*history, {"role": "user", "content": query}],
-    "query": query,
-    "intent": "",
-    "rewritten_query": "",
-    "provider_override": body.provider,
-    "model_override": body.model,
-    "base_url_override": base_url,
-    "api_key_override": api_key,
-    "reasoning_level_override": body.reasoning_level,
-    "step_count": 0,
-    "use_planner": True,
-  }
-  try:
-    routed = router_node(state)
-    state.update(routed)
-  except Exception as e:
-    _log.warning("plan-preview: router failed: %s", e)
-    return {"needs_plan": False, "intent": "chat", "plan_summary": "", "steps": []}
-
-  intent = (routed.get("intent") or "chat").lower()
-  if intent != "research":
-    return {"needs_plan": False, "intent": intent, "plan_summary": "", "steps": []}
-
-  try:
-    planned = planner_node(state)
-    state.update(planned)
-  except Exception as e:
-    _log.warning("plan-preview: planner failed: %s", e)
-    planned = {}
-
-  plan = planned.get("plan") or []
-  steps = [str(s.get("query") or "").strip() for s in plan if isinstance(s, dict)]
-  steps = [s for s in steps if s]
-  return {
-    "needs_plan": bool(steps),
-    "intent": intent,
-    "plan_summary": planned.get("plan_summary") or "",
-    "steps": steps,
-  }
+@router.post("/chat/clarify")
+async def resolve_clarify(body: ClarifyDecision):
+  """用户回答歧义澄清（点选项 / 自由输入 / 跳过），唤醒挂起的 /chat SSE 流。"""
+  from app.agent import clarify as _clarify
+  ok = _clarify.resolve(body.request_id, body.answer)
+  return {"ok": ok}
 
 
 @router.post("/chat")
@@ -344,16 +282,30 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
         yield "event: done\ndata: {}\n\n"
       return StreamingResponse(_ack_stream2(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-  _req_key = (body.api_key or x_api_key or "").strip() or None
-  if _req_key is None:
+  # /api/custom-models 出于安全只返回脱敏 apiKey（sk****xx），前端会把列表值
+  # 原样回传。脱敏 key 非空会覆盖服务端全部凭证回退链，导致上游全线 401
+  # （MiniMax 1004 login fail）。真实 key 不含 '*'，脱敏回显一律视为未携带。
+  _req_key = (body.api_key or x_api_key or "").strip()
+  if "*" in _req_key:
+    _req_key = ""
+  api_key = _req_key or None
+  if not api_key:
+    # 前端刷新后只持有脱敏 key（列表接口不回明文），这里从服务端落盘的
+    # models.json 里取「当前选中条目」的原始 key —— 它才是用户在界面上
+    # 选定的模型配置的真正凭证。
     try:
-      from app.storage import llm_config_store as _lcs
-      _req_key = _lcs.get_api_key() or None
+      from app.storage.models_store import list_models, get_selected_id
+      _sid = get_selected_id()
+      for _m in list_models():
+        if _m.get("id") == _sid:
+          _k = (_m.get("apiKey") or "").strip()
+          if _k and "*" not in _k:
+            api_key = _k
+          break
     except Exception:
       pass
-  api_key = _req_key
   base_url = (body.base_url or "").strip() or None
-  emb_key = _req_key
+  emb_key = api_key
   emb_base = (body.embedding_base_url or body.base_url or "").strip() or None
   emb_model = (body.embedding_model or "").strip() or None
 
@@ -389,18 +341,24 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     rag_hits = 0
     early_done = False
 
-    if settings.use_graph:
-      yield _sse("stage", {"stage": "router", "status": "started"})
+    async def _graph_pass(state_in: dict):
+      """跑一轮图（router -> 各节点），逐事件产出 SSE；结果写回闭包变量。
+
+      歧义澄清场景会跑两轮：第一轮 router 判定歧义即终止（clarify -> END），
+      拿到用户回答后 chat.py 用精炼问题重跑第二轮（skip_clarify 防重复追问）。
+      """
+      nonlocal final_state, intent, rag_hits, early_done
+      final_state = dict(state_in)
       t_router = time.perf_counter()
       # Phase 3.3: thread_id config makes the checkpointer in graph.py save
       # final state per session, so a later call with the same session_id can
-      # resume from where this one left off. chat.py still seeds initial_state
-      # from DB (Phase 2); the checkpointer supplements it for LangGraph-level
+      # resume from where this one left off. chat.py still seeds state from
+      # DB (Phase 2); the checkpointer supplements it for LangGraph-level
       # state continuity.
       graph_config = {"configurable": {"thread_id": session_id}} if session_id else None
       try:
         graph = await get_graph()
-        async for event in graph.astream(initial_state, config=graph_config):
+        async for event in graph.astream(state_in, config=graph_config):
           for node_name, delta in (event or {}).items():
             if not isinstance(delta, dict):
               continue
@@ -477,6 +435,45 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
         # fall through to a minimal legacy answer
         early_done = False
         intent = "chat"
+
+    if settings.use_graph:
+      yield _sse("stage", {"stage": "router", "status": "started"})
+      async for sse in _graph_pass(initial_state):
+        yield sse
+
+      # ---- 歧义澄清（模型驱动，始终开启，无需用户开关）----
+      # router 判定问题有歧义 -> 图先终止 -> SSE clarify 事件弹窗等用户回答
+      # （点选项 / 自由输入 / 超时跳过）-> 回答并入原问题后带 skip_clarify 重跑图。
+      if (not early_done and final_state.get("clarify_request")
+              and not final_state.get("skip_clarify")):
+        from app.agent import clarify as _clarify
+        spec = final_state.get("clarify_request") or {}
+        rid, _fut = _clarify.create_request()
+        yield _sse("clarify", {"request_id": rid,
+                               "question": spec.get("question") or "",
+                               "options": spec.get("options") or []})
+        answer = (await _clarify.wait_answer(rid) or "").strip()
+        base_q = (query or final_state.get("query") or "").strip()
+        refined = ("%s（用户澄清：%s）" % (base_q, answer)) if answer else base_q
+        # 二次执行：重置一次性字段（checkpointer / 首轮残留防护）
+        second_state = dict(final_state)
+        second_state.update({
+            "query": refined,
+            "rewritten_query": refined,
+            "intent": "",
+            "clarify_request": None,
+            "skip_clarify": True,
+            "skip_retrieval": False,
+            "plan": [], "plan_summary": "", "plan_cursor": 0, "plan_status": [],
+            "replan_stalled": False,
+            "research_iterations": 0, "research_notes": [],
+            "retrieved_chunks": [],
+            "answer": None, "citations": [],
+            "ingest_result": {}, "report_result": {},
+        })
+        yield _sse("stage", {"stage": "router", "status": "started"})
+        async for sse in _graph_pass(second_state):
+          yield sse
 
       if early_done:
         yield "data: [DONE]" + chr(10) + chr(10)
@@ -580,7 +577,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     retrieved = []
     if body.use_rag and query:
       try:
-        retrieved = hybrid_search(query, top_k=3, api_key=emb_key,
+        retrieved = hybrid_search(query, top_k=5, api_key=emb_key,
                                   base_url=emb_base, model=emb_model)
       except Exception as e:
         _log.warning("hybrid_search failed: %s", e)
