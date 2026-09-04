@@ -61,25 +61,21 @@ def hybrid_search(
   base_url lets the caller reuse the same OpenAI-compatible endpoint that
   chat is using, so embeddings stay consistent with whatever was at ingest.
   """
-  # vector search
+  # vector search. MiniMax embo-01 does not accept mode="query"
+  # (status_code=2013) so we pick the mode up-front from the resolved URL,
+  # avoiding the round-trip of "try query, fail, retry db" on every search.
   vec_hits: list[dict] = []
   try:
-    emb = embed_texts([query], api_key=api_key, base_url=base_url, model=model, mode="query")[0]
+    from app.embeddings.factory import _resolve_url as _ru
+    _resolved_url = _ru(base_url)
+    _mode = "db" if "minimax" in _resolved_url.lower() else "query"
+    emb = embed_texts([query], api_key=api_key, base_url=base_url, model=model, mode=_mode)[0]
     vec_hits = vector_search(emb, top_k=top_k * 2)
     for h in vec_hits:
       d = h.get("distance")
       h["vec_score"] = max(0.0, 1.0 - (d if d is not None else 1.0))
   except Exception as e:
-    # MiniMax rejects type="query" on embo-01 with status_code=2013.
-    # Fall back to type="db" (ingestion mode) which is the only one MiniMax embo-01 accepts.
-    try:
-      emb = embed_texts([query], api_key=api_key, base_url=base_url, model=model, mode="db")[0]
-      vec_hits = vector_search(emb, top_k=top_k * 2)
-      for h in vec_hits:
-        d = h.get("distance")
-        h["vec_score"] = max(0.0, 1.0 - (d if d is not None else 1.0))
-    except Exception as e2:
-      logging.getLogger(__name__).warning("hybrid_search vector embed failed (query mode: %s; db fallback: %s)", e, e2)
+    logging.getLogger(__name__).warning("hybrid_search vector embed failed: %s", e)
 
   # keyword search (FTS5 / BM25)
   kw_hits = []
