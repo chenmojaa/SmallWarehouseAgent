@@ -215,7 +215,7 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
         # 先经用户批准：yield permission_request -> 前端弹窗 -> POST 决定。
         denied_by_permission = False
         if (perm_mode != "full" and name == "mcp_invoke" and tool is not None
-                and not turn_approved):
+                and tool.get("server") not in turn_approved_targets):
           req_id, _fut = _perm.create_request()
           yield ("permission_request", {
             "request_id": req_id,
@@ -225,7 +225,11 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
           approved = await _perm.wait_decision(req_id)
           yield ("permission_result", {"request_id": req_id, "approved": approved})
           if approved:
-            turn_approved = True
+            # Per-target broker: record this exact server so
+            # subsequent same-server calls in this turn skip the modal.
+            srv = (tool.get('server') or '') if tool else ''
+            if srv:
+                turn_approved_targets.add(srv)
             # 把本次请求涉及的盘符根加入授权范围（后续同轮调用不再被
             # filesystem server 的 allowed-dirs 拦截）
             args = args if isinstance(args, dict) else {}

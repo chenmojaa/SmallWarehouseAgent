@@ -50,6 +50,7 @@ class Settings(BaseSettings):
   feishu_sync_interval_min: int = 15   # minutes between sync runs
   feishu_page_size: int = 50
   feishu_web_url: str = ""             # for constructing view URLs e.g. https://{tenant}.feishu.cn
+  custom_models_allow_private: bool = False       # HD_CUSTOM_MODELS_ALLOW_PRIVATE; allow RFC1918 / loopback in /settings/custom-models (for local Ollama)
 
   # ---- Agent / Router (OPTIMIZATION.md \u00a72.5) ----
   use_graph: bool = True                       # HD_USE_GRAPH; false = legacy direct-call path
