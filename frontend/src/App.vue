@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { t } from '@/i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NConfigProvider, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent,
@@ -11,7 +10,6 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
-import { useChatStore } from '@/stores/chat'
 import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -24,8 +22,44 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const chat = useChatStore()
+// 当前页面所在会话是否正在流式输出（Esc 中断）
+const streamingHere = computed(() => chat.streamingHere)
+
+const isLoginPage = computed(() => route.name === 'login')
+
+const BRAND_BLUE = '#3b82f6'
+const naiveOverrides = computed(() => ({
+  common: {
+    primaryColor: BRAND_BLUE,
+    primaryColorHover: '#60a5fa',
+    primaryColorPressed: '#2563eb',
+    primaryColorSuppl: BRAND_BLUE,
+    infoColor: BRAND_BLUE,
+    infoColorHover: '#60a5fa',
+    infoColorPressed: '#2563eb',
+    successColor: BRAND_BLUE,
+    successColorHover: '#60a5fa',
+    successColorPressed: '#2563eb',
+    // 全局圆角：按钮/输入框/开关等 Naive UI 组件统一圆润外观
+    borderRadius: '10px',
+    borderRadiusSmall: '8px',
+  },
+  Button: { borderRadiusMedium: '10px', borderRadiusSmall: '8px', borderRadiusTiny: '8px' },
+  Input: { borderRadius: '10px' },
+  Tag: { borderRadius: '8px' },
+  Popconfirm: { borderRadius: '10px' },
+}))
+
+function onGlobalKey(e: KeyboardEvent) {
+  const mod = e.metaKey || e.ctrlKey
+  if (mod && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    openPalette()
+    return
+  }
   if (e.key === 'Escape' && streamingHere.value) {
-    chat.abortCtl?.abort()  }
+    chat.abortCtl?.abort()
+  }
 }
 window.addEventListener('keydown', onGlobalKey)
 onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey))

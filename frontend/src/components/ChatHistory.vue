@@ -6,7 +6,6 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { NButton, NPopconfirm, NEmpty, NSpin, NText, NModal, NSpace, NInput } from 'naive-ui'
-import { t } from '@/i18n'
 
 const sessions = useSessionsStore()
 const chat = useChatStore()

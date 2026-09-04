@@ -12,7 +12,6 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import CitationPreview from '@/components/CitationPreview.vue'
 import IngestResultCard from '@/components/IngestResultCard.vue'
 import PlanApprovalCard from '@/components/PlanApprovalCard.vue'
-import { t } from '@/i18n'
 
 const chat = useChatStore()
 const sessions = useSessionsStore()
