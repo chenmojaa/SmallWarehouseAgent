@@ -258,6 +258,8 @@ async function doDeleteAccount() {
             <n-button size="small" @click="doExport">{{ t('settings.account.export', '导出我的数据', 'Export my data') }}</n-button>
             <n-popconfirm
               :show-icon="false"
+              positive-text="确认"
+              negative-text="取消"
               @positive-click="deleteOpen = true"
             >
               <template #trigger>
@@ -401,7 +403,7 @@ async function doDeleteAccount() {
 .drawer-head h3 { margin: 0; font-size: 16px; }
 .close-btn { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: 18px; border-radius: 999px; color: var(--text-secondary); }
 .close-btn:hover { background: var(--hover-bg); }
-.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); }
+.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); justify-content: flex-end; }
 .drawer-tab { padding: 6px 12px; border: 0; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 .drawer-tab:hover { background: var(--hover-bg); }
 .drawer-tab.active { background: rgba(59,130,246,0.18); color: var(--text-primary); }

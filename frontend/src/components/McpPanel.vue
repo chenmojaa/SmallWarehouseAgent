@@ -267,7 +267,7 @@ defineExpose({ summary: computed(() => ({ enabled: enabledCount.value, servers: 
               <n-switch :value='server.enabled' size='small' @update:value='(v) => toggleServer(server, v)' @click.stop />
               <n-button size='small' quaternary :loading='testingId === server.id' @click.stop='testServer(server)'>测试</n-button>
               <n-button size='small' quaternary @click.stop='openEdit(server)'>编辑</n-button>
-              <n-popconfirm @positive-click='removeServer(server)'>
+              <n-popconfirm positive-text="确认" negative-text="取消" @positive-click='removeServer(server)'>
                 <template #trigger>
                   <n-button size='small' quaternary type='error' @click.stop>删除</n-button>
                 </template>

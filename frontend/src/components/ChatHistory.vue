@@ -5,6 +5,7 @@ import { useSessionsStore } from '@/stores/sessions'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { NButton, NPopconfirm, NEmpty, NSpin, NText, NModal, NSpace, NInput } from 'naive-ui'
+import { t } from '@/i18n'
 
 const sessions = useSessionsStore()
 const chat = useChatStore()
@@ -85,22 +86,22 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
 <template>
   <div class="chat-history">
     <div class="chat-history-actions">
-      <n-button block quaternary @click="newChat" class="action-btn new-chat-btn">+ 新对话</n-button>
-      <n-button block quaternary @click="gotoNotes" class="action-btn">知识库</n-button>
-      <n-button block quaternary @click="openSearch" class="action-btn">搜索对话</n-button>
-      <n-button block quaternary @click="gotoSkillsMcp" class="action-btn">技能 · MCP</n-button>
+      <n-button block quaternary @click="newChat" class="action-btn new-chat-btn">{{ t('nav.newChat', '+ 新对话', '+ New Chat') }}</n-button>
+      <n-button block quaternary @click="gotoNotes" class="action-btn">{{ t('nav.notes', '知识库', 'Knowledge Base') }}</n-button>
+      <n-button block quaternary @click="openSearch" class="action-btn">{{ t('nav.searchChat', '搜索对话', 'Search Chats') }}</n-button>
+      <n-button block quaternary @click="gotoSkillsMcp" class="action-btn">{{ t('nav.skills', '技能 · MCP', 'Skills · MCP') }}</n-button>
     </div>
     <div class="chat-history-header">
-      <span class="title">历史记录</span>
+      <span class="title">{{ t('nav.history', '历史记录', 'History') }}</span>
     </div>
     <div class="chat-history-list">
       <div v-if="sessions.loading && sessions.items.length === 0" class="loading-row">
         <n-spin size="small" />
-        <n-text depth="3" style="font-size: 12px">加载中…</n-text>
+        <n-text depth="3" style="font-size: 12px">{{ t('nav.loading', '加载中…', 'Loading…') }}</n-text>
       </div>
       <template v-else-if="sessions.items.length > 0">
         <button v-if="sessions.error" class="stale-retry" type="button" @click="retryInitialLoad">
-          已显示缓存 · 加载失败，点击重试
+          {{ t('nav.cacheError', '已显示缓存 · 加载失败，点击重试', 'Showing cache · Load failed, click to retry') }}
         </button>
         <div
           v-for="s in sessions.items"
@@ -110,31 +111,31 @@ function pickSession(id: string) { searchOpen.value = false; router.push({ name:
         >
           <div class="session-row">
             <span class="session-title">{{ s.title }}</span>
-            <n-button text size="small" @click.stop="forkSession(s.id, $event)" class="fork-btn" title="分叉：复制对话与全部消息到新会话">⤴</n-button>
-            <n-popconfirm @positive-click="removeSession(s.id, $event)">
+            <n-button text size="small" @click.stop="forkSession(s.id, $event)" class="fork-btn" :title="t('nav.forkTitle', '分叉：复制对话与全部消息到新会话', 'Fork: copy chat and all messages to new session')">⤴</n-button>
+            <n-popconfirm positive-text="确认" negative-text="取消" @positive-click="removeSession(s.id, $event)">
               <template #trigger>
                 <n-button text size="small" type="error" @click.stop class="delete-btn">✕</n-button>
               </template>
-              删除该对话？
+              {{ t('nav.deleteConfirm', '删除该对话？', 'Delete this chat?') }}
             </n-popconfirm>
           </div>
           <div v-if="s.preview" class="session-preview">{{ s.preview }}</div>
           <div class="session-meta">{{ fmt(s.updated_at) }} · {{ s.message_count }} 条</div>
         </div>
       </template>
-      <n-empty v-else-if="sessions.error" size="small" description="历史记录加载失败" style="padding: 24px 0">
+      <n-empty v-else-if="sessions.error" size="small" :description="t('nav.historyLoadFail', '历史记录加载失败', 'History load failed')" style="padding: 24px 0">
         <template #extra>
-          <n-button size="small" @click="retryInitialLoad">重试</n-button>
+          <n-button size="small" @click="retryInitialLoad">{{ t('nav.retry', '重试', 'Retry') }}</n-button>
         </template>
       </n-empty>
-      <n-empty v-else size="small" description="点击 + 新对话 开始" style="padding: 24px 0" />
+      <n-empty v-else size="small" :description="t('nav.emptyHint', '点击 + 新对话 开始', 'Click + New Chat to start')" style="padding: 24px 0" />
     </div>
   </div>
   <!-- 搜索对话 -->
-  <n-modal v-model:show="searchOpen" preset="card" title="搜索对话" style="max-width: 480px">
-    <n-input v-model:value="searchQuery" placeholder="搜索会话标题或预览片段" clearable />
+  <n-modal v-model:show="searchOpen" preset="card" :title="t('nav.searchTitle', '搜索对话', 'Search Chats')" style="max-width: 480px">
+    <n-input v-model:value="searchQuery" :placeholder="t('nav.searchPlaceholder', '搜索会话标题或预览片段', 'Search session titles or previews')" clearable />
     <n-space vertical size="small" style="margin-top: 12px; max-height: 360px; overflow-y: auto">
-      <n-empty v-if="!sessions.loading && searchedSessions.length === 0" description="没有匹配的对话" />
+      <n-empty v-if="!sessions.loading && searchedSessions.length === 0" :description="t('nav.searchEmpty', '没有匹配的对话', 'No matching chats')" />
       <div
         v-for="s in searchedSessions"
         :key="s.id"

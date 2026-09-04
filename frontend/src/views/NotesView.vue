@@ -445,7 +445,7 @@ function openExternal(url?: string | null) {
             <button v-if="note.source_type === 'url'" @click="openExternal(note.source_url)">打开</button>
             <button @click="downloadNote(note.id, note.title)">下载</button>
             <button v-if="!note.embedded" class="warn" @click="reembed(note.id)">重建索引</button>
-            <n-popconfirm @positive-click="removeNote(note.id)">
+            <n-popconfirm positive-text="确认" negative-text="取消" @positive-click="removeNote(note.id)">
               <template #trigger><button class="danger">删除</button></template>
               删除该笔记？
             </n-popconfirm>

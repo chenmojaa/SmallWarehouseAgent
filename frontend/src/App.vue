@@ -16,6 +16,7 @@ import CommandPalette from '@/components/CommandPalette.vue'
 import { open as openPalette } from '@/composables/useCommandPalette'
 import { sidebarDrawerOpen, toggleSidebarDrawer, closeSidebarDrawer } from '@/composables/useMobileDrawer'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
+import { t } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -136,7 +137,7 @@ const paletteOpen = ref(false)
           <n-space align="center">
             <button
               class="sider-toggle"
-              :title="siderCollapsed ? '展开侧边栏' : '收起侧边栏'"
+              :title="siderCollapsed ? t('app.header.expandSider', '展开侧边栏', 'Expand sidebar') : t('app.header.collapseSider', '收起侧边栏', 'Collapse sidebar')"
               @click="toggleSider"
             >
               <svg v-if="siderCollapsed" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -156,16 +157,16 @@ const paletteOpen = ref(false)
           <n-space align="center" :wrap="false">
             <button
               class="theme-toggle"
-              :title="settings.theme === 'dark' ? '切换到白昼' : '切换到黑夜'"
+              :title="settings.theme === 'dark' ? t('app.header.lightTheme', '切换到白昼', 'Switch to light') : t('app.header.darkTheme', '切换到黑夜', 'Switch to dark')"
               @click="toggleTheme"
             >
               <span v-if="settings.theme === 'dark'" class="theme-icon">☀</span>
               <span v-else class="theme-icon">☾</span>
             </button>
-            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">笔记</n-button></router-link>
-            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">设置</n-button>
+            <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('app.header.notes', '笔记', 'Notes') }}</n-button></router-link>
+            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">{{ t('app.header.settings', '设置', 'Settings') }}</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
-            <n-button quaternary size="small" @click="handleLogout">退出</n-button>
+            <n-button quaternary size="small" @click="handleLogout">{{ t('app.header.logout', '退出', 'Logout') }}</n-button>
           </n-space>
         </n-layout-header>
         <n-layout has-sider style="height: calc(100vh - 48px)">
