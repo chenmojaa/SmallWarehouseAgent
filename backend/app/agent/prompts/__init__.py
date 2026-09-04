@@ -42,6 +42,7 @@ _DEFAULTS = {
     "    mindmap — topic breakdown / hierarchies\n"
     "  Give the diagram a one-line lead-in sentence, keep node labels short (ideally <= 12 characters), and let the diagram carry the key information while the text supplies details.\n"
     "  Do NOT force a diagram onto simple factual Q&A, greetings, or one-line answers — use one only when it genuinely makes the answer clearer.\n"
+    "  Mermaid syntax MUST be valid: one statement (one edge or one node definition) per line; NEVER put two arrows on the same line; the mermaid code itself must never contain ``` or other markdown fence characters.\n"
     "- Never draw with ASCII-art boxes; mermaid blocks only.\n"
     "- For images, use Markdown image syntax ![alt](url).\n"
     "- Citations: also collect every [n] you reference into ONE trailing line at the very end:\n"

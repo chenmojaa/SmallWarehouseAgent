@@ -199,7 +199,7 @@ const renderedHtml = computed(() => {
   if (props.role !== 'assistant') return ''
   const raw = md.parse(bodyNoCite.value, { async: false }) as string
   return DOMPurify.sanitize(raw, {
-    ADD_ATTR: ['data-source', 'data-rendered', 'class', 'data-cite', 'title'],
+    ADD_ATTR: ['data-source', 'data-rendered', 'data-action', 'class', 'data-cite', 'title'],
     ADD_TAGS: ['span'],
   })
 })
@@ -294,24 +294,68 @@ async function ensureMermaid(): Promise<void> {
   mermaidReady = true
 }
 
+// LLM 生成 mermaid 时常见的两类语法小错会导致整张图回退成文字：
+//  1) 一行写多条连线（"H --> K     K --> S"）——mermaid 要求一行一条语句
+//  2) 源码里混入 ``` 围栏残留（如末尾 "T --> U```"）
+// 这里在渲染前做保守修复：去反引号、把同行的后续语句前插入 ';'（官方分隔符）。
+function repairMermaidSource(src: string): string {
+  const s = src.replace(/```+/g, '').replace(/\r\n/g, '\n')
+  const ARROW = '(?:-->|==>|-\\.->|--o|--x|->>|-->>|->)'
+  const stmtStart = new RegExp(
+    '[A-Za-z0-9_\\u4e00-\\u9fff][\\w\\u4e00-\\u9fff"-]*' + // 节点 ID
+    '\\s*(?:\\[[^\\]]*\\]|\\([^)]*\\)|\\{[^}]*\\})?' +     // 可选形状 [..]/(..)/{..}
+    '\\s*' + ARROW
+  )
+  const lines = s.split('\n').map((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('%%')) return line
+    const arrows = line.match(/--?>|==>|-\.->|--o|--x|->>|-->>/g)
+    if (!arrows || arrows.length < 2) return line
+    // 语句边界：非行首的空白段，其后紧跟「节点ID + 可选形状 + 箭头」→ 替换为 '; '
+    return line.replace(
+      new RegExp('(?<=\\S)\\s+(?=' + stmtStart.source + ')', 'g'),
+      '; ',
+    )
+  })
+  return lines.join('\n').trim()
+}
+
 async function renderMermaidIn(root: HTMLElement): Promise<void> {
   const blocks = Array.from(root.querySelectorAll<HTMLElement>('.mermaid-block:not([data-rendered])'))
   for (const block of blocks) {
     const source = decodeURIComponent(block.getAttribute('data-source') || block.textContent || '')
-    const id = 'mmd-' + Math.random().toString(36).slice(2, 10)
-    try {
-      const { svg } = await mermaid.render(id, source)
+    const renderOnce = async (code: string) => {
+      const id = 'mmd-' + Math.random().toString(36).slice(2, 10)
+      const { svg } = await mermaid.render(id, code)
+      return svg
+    }
+    const paintSvg = (svg: string) => {
       // 强制 SVG 背景透明，适配暗色主题
       const svgClean = svg.replace(/<rect[^>]*fill="[^"]*"[^>]*\/>/g, '')
         .replace(/fill="#fff[^"]*"/g, 'fill="transparent"')
         .replace(/fill="#ffffff[^"]*"/g, 'fill="transparent"')
       block.innerHTML = svgClean
       block.setAttribute('data-rendered', '1')
-    } catch (e) {
-      // Fall back to a plain code block so the raw source is still visible.
-      block.classList.remove('mermaid-block')
-      block.innerHTML = '<pre><code class="language-mermaid">' + escapeHtml(source) + '</code></pre>'
-      block.setAttribute('data-rendered', '1')
+    }
+    try {
+      paintSvg(await renderOnce(source))
+    } catch {
+      // 原文解析失败：尝试修复语法后重试一次
+      try {
+        const repaired = repairMermaidSource(source)
+        if (repaired && repaired !== source.trim()) {
+          paintSvg(await renderOnce(repaired))
+          // 修复成功：同步 data-source，让「复制源码」拿到可直接渲染的版本
+          block.setAttribute('data-source', encodeURIComponent(repaired))
+          continue
+        }
+        throw new Error('repair no-op')
+      } catch {
+        // 仍然失败：回退为普通代码块，保证源码可见
+        block.classList.remove('mermaid-block')
+        block.innerHTML = '<pre><code class="language-mermaid">' + escapeHtml(source) + '</code></pre>'
+        block.setAttribute('data-rendered', '1')
+      }
     }
   }
 }
