@@ -29,8 +29,8 @@ _RERANK_PROMPT = """你是重排序助手。对每条候选文本,判断它对�
 <<CANDIDATES>>
 """
 
-_JSON_ARR_RE = re.compile(r"[[sS]*]")
-_THINK_RE = re.compile(r"<think(?:ing)?>[sS]*?</think(?:ing)?>", re.IGNORECASE)
+_JSON_ARR_RE = re.compile(r"\[[\s\S]*\]")
+_THINK_RE = re.compile(r"<think(?:ing)?>[\s\S]*?</think(?:ing)?>", re.IGNORECASE)
 
 
 def _strip_think(text):

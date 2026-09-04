@@ -152,6 +152,41 @@ def delete_fts(note_id: str) -> int:
   return result.rowcount or 0
 
 
+# FTS5 operator characters we must strip from user input before it can become
+# a MATCH expression. Anything outside this set is treated as ordinary text and
+# gets double-quoted so FTS5 does not interpret it as syntax.
+_FTS5_BAD = set('"()*:^\-+')
+
+def _fts_sanitize_phrase(raw: str) -> str:
+  """Return raw with FTS5 operators replaced by spaces, then collapsed."""
+  if not raw:
+    return ""
+  cleaned = "".join(" " if ch in _FTS5_BAD else ch for ch in raw)
+  return " ".join(cleaned.split())
+
+def _fts_tokenize(raw: str) -> list[str]:
+  """Split a query into safe per-token terms for an OR-expression."""
+  cleaned = _fts_sanitize_phrase(raw)
+  if not cleaned:
+    return []
+  out: list[str] = []
+  for tok in cleaned.split():
+    if all(0x4E00 <= ord(c) <= 0x9FFF for c in tok):
+      out.extend(tok)
+    else:
+      out.append(tok)
+  seen: set[str] = set()
+  uniq: list[str] = []
+  for t in out:
+    if t and t not in seen:
+      seen.add(t)
+      uniq.append(t)
+  return uniq
+
+def _fts_quote(term: str) -> str:
+  """Quote a single term so FTS5 treats it as literal text."""
+  return '"' + term.replace(chr(34), chr(34) * 2) + '"'
+
 def fts_search(query: str, top_k: int = 5) -> list[dict]:
   """Two-pass FTS5 search that survives both ASCII and CJK queries.
 
@@ -165,31 +200,14 @@ def fts_search(query: str, top_k: int = 5) -> list[dict]:
   """
   if not query or not query.strip():
     return []
-  raw = query.strip()
-  cleaned = raw
-  for ch in (chr(34), chr(40), chr(41), chr(42), chr(94), chr(58)):
-    cleaned = cleaned.replace(ch, chr(32))
-  cleaned = cleaned.strip()
+  cleaned = _fts_sanitize_phrase(query.strip())
   if not cleaned:
     return []
-  tokens = []
-  for tok in cleaned.split():
-    if not tok:
-      continue
-    if all(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in tok):
-      tokens.extend(list(tok))
-    else:
-      tokens.append(tok)
-  seen = set()
-  uniq_tokens = []
-  for t in tokens:
-    if t and t not in seen:
-      seen.add(t)
-      uniq_tokens.append(t)
+  uniq_tokens = _fts_tokenize(query.strip())
   base_sql = (
     "SELECT note_id, chunk_index, content, bm25(chunk_fts) AS score "
     "FROM chunk_fts "
-    "WHERE chunk_fts MATCH __MATCH__ "
+    "WHERE chunk_fts MATCH :match "
     "ORDER BY score "
     "LIMIT :k"
   )
@@ -205,19 +223,15 @@ def fts_search(query: str, top_k: int = 5) -> list[dict]:
         by_key[key] = hit
 
   with get_engine().begin() as conn:
-    phrase_dq = cleaned.replace(chr(34), chr(34) + chr(34))
-    phrase_dq = chr(34) + phrase_dq + chr(34)
     try:
-      sql1 = base_sql.replace("__MATCH__", chr(39) + phrase_dq + chr(39))
-      rows = conn.execute(text(sql1), {"k": top_k}).all()
+      rows = conn.execute(text(base_sql), {"match": _fts_quote(cleaned), "k": top_k}).all()
       _absorb(rows)
     except Exception:
       pass
     if len(by_key) < top_k and uniq_tokens:
       try:
-        or_expr = " OR ".join(uniq_tokens).replace(chr(34), "")
-        sql2 = base_sql.replace("__MATCH__", chr(39) + or_expr + chr(39))
-        rows = conn.execute(text(sql2), {"k": top_k}).all()
+        or_expr = " OR ".join(_fts_quote(t) for t in uniq_tokens)
+        rows = conn.execute(text(base_sql), {"match": or_expr, "k": top_k}).all()
         _absorb(rows)
       except Exception:
         pass

@@ -25,6 +25,30 @@ from app.storage.models_store import (
 
 _log = logging.getLogger(__name__)
 router = APIRouter(tags=["custom-models"])
+def _mask_model(m: dict) -> dict:
+  """Return a copy of m with apiKey replaced by a non-reversible marker.
+
+  Keeps the original key on disk via models_store; only the network response
+  is sanitized so a stolen bearer token cannot leak plaintext provider keys.
+  """
+  if not isinstance(m, dict):
+    return m
+  out = dict(m)
+  k = out.get("apiKey")
+  if isinstance(k, str) and k:
+    if len(k) <= 8:
+      masked = "*" * len(k)
+    else:
+      masked = k[:2] + "*" * (len(k) - 6) + k[-4:]
+    out["apiKey"] = masked
+    out["apiKeySet"] = True
+  else:
+    out["apiKey"] = ""
+    out["apiKeySet"] = False
+  return out
+
+
+
 
 
 class SubModelSpec(BaseModel):
@@ -58,13 +82,14 @@ class SelectRequest(BaseModel):
 
 @router.get("/custom-models")
 async def api_list():
-  return {"items": list_models(), "selected_id": get_selected_id(), "path": models_file_path()}
+  items = [_mask_model(m) for m in list_models()]
+  return {"items": items, "selected_id": get_selected_id(), "path": models_file_path()}
 
 
 @router.post("/custom-models")
 async def api_create(body: CreateCustomModelRequest):
   try:
-    return create_model(body.model_dump())
+    return _mask_model(create_model(body.model_dump()))
   except ValueError as e:
     raise HTTPException(status_code=400, detail=str(e))
 
@@ -75,7 +100,7 @@ async def api_update(model_id: str, body: UpdateCustomModelRequest):
   result = update_model(model_id, patch)
   if not result:
     raise HTTPException(status_code=404, detail="Model not found")
-  return result
+  return _mask_model(result)
 
 
 @router.delete("/custom-models/{model_id}")

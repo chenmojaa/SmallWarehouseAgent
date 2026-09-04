@@ -87,8 +87,15 @@ async def _require_auth(request: Request, call_next):
   Sets request.state.user_id on success so endpoints can identify the user.
   """
   path = request.url.path
-  is_auth_endpoint = path.startswith("/api/auth") and path != "/api/auth/me"
-  if path.startswith("/api") and not is_auth_endpoint and path != "/api/health":
+  # Public auth surface: anything outside this set needs a valid token.
+  _PUBLIC_AUTH_PATHS = {
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/change-password",
+    "/api/health",
+  }
+  if path.startswith("/api") and path not in _PUBLIC_AUTH_PATHS:
     from app.api.auth import verify_token
     token = (request.headers.get("authorization") or "").strip()
     if token.lower().startswith("bearer "):
@@ -97,7 +104,7 @@ async def _require_auth(request: Request, call_next):
       token = (request.headers.get("x-auth-token") or "").strip()
     user_id = verify_token(token)
     if user_id is None:
-      return JSONResponse(status_code=401, content={"detail": "未登录或登录已过期"})
+      return JSONResponse(status_code=401, content={"detail": "未登录或会话已过期"})
     request.state.user_id = user_id
   return await call_next(request)
 
