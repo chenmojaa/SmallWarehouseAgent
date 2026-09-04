@@ -233,6 +233,7 @@ async function doDeleteAccount() {
       </div>
 
       <div class="drawer-tabs">
+        <div class="tabs-spacer" />
         <button
           v-for="tab in sectionTabs"
           :key="tab.key"
@@ -306,9 +307,11 @@ async function doDeleteAccount() {
                 <span class="muted">{{ entry.provider }} · {{ entry.models.length }} {{ t('custom_models.models', '个模型', 'models') }}</span>
               </div>
               <div class="entry-base">{{ entry.baseUrl }}</div>
-              <n-button size="tiny" type="error" ghost @click="removeEntry(entry.id)">
-                {{ t('common.delete', '删除', 'Delete') }}
-              </n-button>
+              <div class="entry-actions">
+                <n-button size="tiny" type="error" ghost @click="removeEntry(entry.id)">
+                  {{ t('common.delete', '删除', 'Delete') }}
+                </n-button>
+              </div>
             </div>
           </div>
         </div>
@@ -403,7 +406,7 @@ async function doDeleteAccount() {
 .drawer-head h3 { margin: 0; font-size: 16px; }
 .close-btn { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: 18px; border-radius: 999px; color: var(--text-secondary); }
 .close-btn:hover { background: var(--hover-bg); }
-.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); justify-content: flex-end; }
+.drawer-tabs { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); justify-content: flex-end !important; width: 100%; }
 .drawer-tab { padding: 6px 12px; border: 0; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 .drawer-tab:hover { background: var(--hover-bg); }
 .drawer-tab.active { background: rgba(59,130,246,0.18); color: var(--text-primary); }
@@ -420,13 +423,14 @@ async function doDeleteAccount() {
 .key-label { color: var(--text-secondary); font-size: 13px; }
 .val { font-size: 13px; color: var(--text-primary); }
 .val.mono { font-family: ui-monospace, monospace; font-size: 12px; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .detected-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .entries { display: flex; flex-direction: column; gap: 8px; }
 .entry { padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 8px; }
 .entry-head { display: flex; justify-content: space-between; align-items: center; }
 .muted { color: var(--text-secondary); font-size: 12px; }
 .entry-base { color: var(--text-muted); font-size: 12px; font-family: ui-monospace, monospace; }
+.entry-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
 .hr { height: 1px; background: var(--border-soft); margin: 8px 0; }
 .status-ok { color: var(--success-color, #22c55e); font-size: 12px; }
 .spaces { display: flex; gap: 4px; flex-wrap: wrap; }
