@@ -1,4 +1,4 @@
-﻿"""Hybrid search: vector (Chroma) + keyword (FTS5) -> dedupe + rerank."""
+"""Hybrid search: vector (Chroma) + keyword (FTS5) -> dedupe + rerank."""
 from __future__ import annotations
 
 import logging
@@ -188,8 +188,13 @@ def filter_by_meta(results, source_type=None, tag=None, date_from=None, date_to=
 def hybrid_search_with_expansion(query, top_k=5, **kwargs):
   """hybrid_search + optional query expansion + optional rerank."""
   from app.agent.retrieval_quality import expand_query, rerank
+  # Caller-supplied credentials must reach expand_query + rerank so the
+  # LLM helper uses the requester's provider instead of silently falling
+  # back to settings.router_* (per-request override was previously ignored).
+  _rq_api_key = kwargs.get("api_key")
+  _rq_base_url = kwargs.get("base_url")
   if kwargs.get("expand"):
-    variants = expand_query(query)
+    variants = expand_query(query, api_key=_rq_api_key, base_url=_rq_base_url)
     merged_acc = []
     seen = set()
     for v in variants:
@@ -205,7 +210,7 @@ def hybrid_search_with_expansion(query, top_k=5, **kwargs):
     results = hybrid_search(query, top_k=top_k, **{k: vv for k, vv in kwargs.items() if k not in ("expand", "rerank")})
 
   if kwargs.get("rerank") and len(results) > 1:
-    results = rerank(query, results)
+    results = rerank(query, results, api_key=_rq_api_key, base_url=_rq_base_url)
   # Parent-child dedup + context window (always on; pass expand_window=0 to opt out).
   expand_window = kwargs.pop("expand_window", 2)
   if expand_window != 0 and results:
