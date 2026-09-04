@@ -98,6 +98,10 @@ export const useChatStore = defineStore("chat", {
   },
   actions: {
     toggleRag() { this.useRag = !this.useRag },
+    abortStream() {
+      this.abortCtl?.abort()
+      this.abortCtl = null
+    },
     togglePlanner() {
       this.usePlanner = !this.usePlanner
       try {

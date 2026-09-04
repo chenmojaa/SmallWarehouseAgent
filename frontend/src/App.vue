@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useSessionsStore } from '@/stores/sessions'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
+import { useChatStore } from '@/stores/chat'
 import ChatHistory from '@/components/ChatHistory.vue'
 import StreamingIndicator from '@/components/StreamingIndicator.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
@@ -20,6 +21,7 @@ import SettingsDrawer from '@/components/SettingsDrawer.vue'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const chat = useChatStore()
 
 const isLoginPage = computed(() => route.name === 'login')
 
@@ -48,7 +50,7 @@ function onGlobalKey(e: KeyboardEvent) {
     paletteOpen.value = true
     return
   }
-  if (e.key === 'Escape' && streamingHere.value) {
+  if (e.key === 'Escape' && chat.streamingHere) {
     chat.abortStream?.()
   }
 }
@@ -153,7 +155,7 @@ const paletteOpen = ref(false)
               <span v-else class="theme-icon">☾</span>
             </button>
             <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">{{ t('ui.notes.003', '笔记', '笔记') }}</n-button></router-link>
-            <n-button quaternary size="small" @click="settingsOpen = true">{{ t('nav.settings', '设置', 'Settings') }}</n-button>
+            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">{{ t('nav.settings', '设置', 'Settings') }}</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
             <n-button quaternary size="small" @click="handleLogout">{{ t('nav.logout', '退出', 'Logout') }}</n-button>
           </n-space>

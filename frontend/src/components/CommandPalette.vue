@@ -34,9 +34,9 @@ interface CommandItem {
 const items = computed<CommandItem[]>(() => {
   const list: CommandItem[] = [
     // navigation
-    { id: 'nav.chat', title: '新对话', emoji: '💬', group: '导航', run: () => { chat.clear(); router.push('/chat') } },
-    { id: 'nav.notes', title: '知识库', emoji: '📚', group: '导航', run: () => router.push('/notes') },
-    { id: 'nav.skills', title: '技能 / MCP', emoji: '🧩', group: '导航', run: () => router.push('/mcp') },
+    { id: 'nav.chat', title: '新对话', emoji: '💬', group: '导航', run: () => { chat.clear(); void router.push('/chat') } },
+    { id: 'nav.notes', title: '知识库', emoji: '📚', group: '导航', run: () => { void router.push('/notes') } },
+    { id: 'nav.skills', title: '技能 / MCP', emoji: '🧩', group: '导航', run: () => { void router.push('/mcp') } },
     // theme
     { id: 'theme.dark', title: '切换深色主题', emoji: '🌙', group: '外观', run: () => { settings.theme = 'dark'; settings.persist() } },
     { id: 'theme.light', title: '切换浅色主题', emoji: '☀️', group: '外观', run: () => { settings.theme = 'light'; settings.persist() } },
@@ -57,7 +57,7 @@ const items = computed<CommandItem[]>(() => {
       emoji: '💬',
       group: '最近会话',
       keywords: (s.title || '') + ' ' + (s.preview || ''),
-      run: () => router.push({ name: 'chat-id', params: { id: s.id } }),
+      run: () => { void router.push({ name: 'chat-id', params: { id: s.id } }) },
     })
   }
   return list

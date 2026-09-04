@@ -85,6 +85,14 @@ export const useSettingsStore = defineStore('settings', {
       this.apiKeySet = false
       this.apiKey = ''
     },
+    persist() {
+      // Persist current settings to backend. Provider/model/embedding changes
+      // are not yet wired through the backend (no saveLlmConfig({ llm_provider })
+      // exists in @/api/settings), so persist() currently only re-syncs the api_key.
+      return import('@/api/settings').then(m =>
+        m.saveLlmConfig({ api_key: this.apiKey }).catch(() => {})
+      )
+    },
     setTheme(t: Theme) {
       this.theme = t
       try { localStorage.setItem(THEME_KEY, t) } catch {}

@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { detectModels } from '@/api/custom-models'
 import { getFeishuConfig, updateFeishuConfig, testFeishuConnection } from '@/api/feishu'
 import { exportMyData, deleteMyAccount } from '@/api/auth'
-import { setLocale, getLocale, t as _t } from '@/i18n'
+import { setLocale, getLocale } from '@/i18n'
 import {
   NInput, NButton, NTag, NEmpty, NPopconfirm, NSpin, NSwitch, NModal,
   useMessage,
@@ -22,7 +22,6 @@ const settings = useSettingsStore()
 const auth = useAuthStore()
 const message = useMessage()
 
-const t = _t
 
 const section = ref<'profile' | 'models' | 'knowledge' | 'appearance' | 'operations'>('profile')
 
@@ -297,9 +296,9 @@ async function doDeleteAccount() {
           <div class="hr" />
 
           <h4>{{ t('settings.models', '自定义模型', 'Custom Models') }}</h4>
-          <n-empty v-if="models.items.length === 0" :description="t('custom_models.none', '暂无配置', 'No models yet')" />
+          <n-empty v-if="models.list.length === 0" :description="t('custom_models.none', '暂无配置', 'No models yet')" />
           <div v-else class="entries">
-            <div v-for="entry in models.items" :key="entry.id" class="entry">
+            <div v-for="entry in models.list" :key="entry.id" class="entry">
               <div class="entry-head">
                 <strong>{{ entry.name }}</strong>
                 <span class="muted">{{ entry.provider }} · {{ entry.models.length }} {{ t('custom_models.models', '个模型', 'models') }}</span>
