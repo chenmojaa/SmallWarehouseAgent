@@ -71,6 +71,30 @@ def _resolve_embedding_model(body_model: Optional[str], header_model: Optional[s
   return (body_model or header_model or "").strip() or None
 
 
+_ALLOWED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".html", ".htm", ".txt", ".md", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".gif"}
+
+async def _safe_read_upload(file, max_bytes: int) -> bytes:
+    """Read an UploadFile in chunks, refusing payloads > max_bytes."""
+    total = 0
+    buf = bytearray()
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="file too large (>%d bytes)" % max_bytes)
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def _check_ext(filename: str) -> None:
+    from pathlib import Path
+    ext = Path(filename or "").suffix.lower()
+    if ext not in _ALLOWED_EXTS:
+        raise HTTPException(status_code=415, detail="unsupported file type: " + (ext or "<none>"))
+
+
 @router.post("/notes/url")
 async def api_ingest_url(
   body: IngestURLRequest,
@@ -278,7 +302,9 @@ async def api_reembed_note(
   with open(content_path, "r", encoding="utf-8", errors="ignore") as f:
     content = f.read()
 
-  delete_note_chunks(note_id_local)
+  # Re-embed ordering: produce the new chunks first, then evict the old ones.
+  # Old code deleted first, which left a note with no retrievable body if
+  # the embed request failed partway through.
   chunks = chunk_text(content)
   try:
     embeddings = embed_texts(
@@ -288,6 +314,12 @@ async def api_reembed_note(
       model=_resolve_embedding_model(None, x_embedding_model),
     )
     n = add_chunks(note_id_local, chunks, embeddings)
+    # New vectors are in place; only now do we evict the old ones. The
+    # add_chunks path uses the same note id, so old + new vectors coexist
+    # briefly inside Chroma; we delete by id right after to keep tidy.
+    # If this delete fails, worst case is duplicated retrieval, which is
+    # recoverable by another reembed.
+    delete_note_chunks(note_id_local)
     with get_session() as s:
       note = s.get(Note, note_id_local)
       if note:

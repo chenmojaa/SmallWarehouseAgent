@@ -176,7 +176,7 @@ async def answer_node_stream(state: AgentState, instructions_override=None):
   from app.agent.tools import permissions as _perm
   perm_mode = (state.get("agent_permission") or "default").lower()
   _mcp_tools.set_permission_mode(perm_mode)
-  turn_approved = False  # 一轮内批准过一次后续不再重复询问
+  turn_approved_targets: set[str] = set()  # 同一目标已批准过则不再询问
 
   if tools and settings.tools_enabled:
     from langchain_core.messages import ToolMessage
