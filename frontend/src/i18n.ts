@@ -109,6 +109,17 @@ export const translations: Record<string, { zh: string; en: string }> = {
   'chat.perm.title.default': { zh: '默认权限：Agent 访问本地文件前会先询问你', en: 'Default - Agent prompts before reading local files' },
   'chat.perm.title.full': { zh: '完全访问：Agent 可直接访问本机磁盘，不再询问', en: 'Full Access - Agent can read/write any local file without prompting' },
   'chat.perm.placeholder': { zh: '默认权限', en: 'Default' },
+  // HITL 计划审批
+  'chat.planApproval.toggle': { zh: '审批', en: 'Approve' },
+  'chat.planApproval.tip.on': { zh: '计划审批已开启：研究任务先生成计划，你确认后才执行', en: 'Plan approval ON: research tasks wait for your review before running' },
+  'chat.planApproval.tip.off': { zh: '计划审批已关闭：计划自动执行', en: 'Plan approval OFF: plans run automatically' },
+  'chat.planApproval.title': { zh: '执行计划待确认', en: 'Plan awaiting review' },
+  'chat.planApproval.run': { zh: '运行', en: 'Run' },
+  'chat.planApproval.cancel': { zh: '取消', en: 'Cancel' },
+  'chat.planApproval.addStep': { zh: '+ 添加步骤', en: '+ Add step' },
+  'chat.planApproval.deleteStep': { zh: '删除此步骤', en: 'Delete step' },
+  'chat.planApproval.stepPlaceholder': { zh: '检索子问题', en: 'sub-query' },
+  'chat.planApproval.cancelled': { zh: '已取消', en: 'Cancelled' },
   'chat.perm.confirm.title': { zh: '⚠️ 确认开启完全访问？', en: '⚠️ Enable Full Access?' },
   'chat.perm.confirm.desc': {
     zh: '开启后，Agent 可以直接读写本机所有磁盘的文件，执行操作前不再询问你。请确认你了解其中的风险。可随时切回「默认权限」恢复逐次确认。',

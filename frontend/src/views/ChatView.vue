@@ -10,6 +10,8 @@ import ThinkingIndicator from '@/components/ThinkingIndicator.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import CitationPreview from '@/components/CitationPreview.vue'
 import IngestResultCard from '@/components/IngestResultCard.vue'
+import PlanApprovalCard from '@/components/PlanApprovalCard.vue'
+import { t } from '@/i18n'
 
 const chat = useChatStore()
 const sessions = useSessionsStore()
@@ -138,6 +140,17 @@ function onKey(e: KeyboardEvent) {
           >
             <span>Plan</span>
           </button>
+          <button
+            type="button"
+            class="plan-toggle"
+            :class="{ on: chat.planApproval }"
+            :title="chat.planApproval
+              ? t('chat.planApproval.tip.on', '计划审批已开启：研究任务先生成计划，你确认后才执行', 'Plan approval ON: research tasks wait for your review before running')
+              : t('chat.planApproval.tip.off', '计划审批已关闭：计划自动执行', 'Plan approval OFF: plans run automatically')"
+            @click="chat.togglePlanApproval()"
+          >
+            <span>{{ t('chat.planApproval.toggle', '审批', 'Approve') }}</span>
+          </button>
           <div class="rag-group">
             <span class="rag-label">知识库</span>
             <NSwitch :value="chat.useRag" @update:value="chat.toggleRag()" size="small" />
@@ -177,6 +190,16 @@ function onKey(e: KeyboardEvent) {
     <div ref="scrollRef" class="chat-scroll">
       <div class="chat-container">
         <div v-for="m in chat.messages" :key="m.id" :class="['msg-row', 'msg-' + m.role]">
+          <!-- HITL 计划审批卡片：待批准/已取消（approved 后由 plan-strip 接管） -->
+          <PlanApprovalCard
+            v-if="m.role === 'assistant' && m.planApproval && m.planApproval.status !== 'approved'"
+            :summary="m.planApproval.summary"
+            :steps="m.planApproval.steps"
+            :status="m.planApproval.status"
+            :disabled="chat.isStreaming"
+            @run="(steps: string[]) => chat.approvePlan(m.id, steps, m.planApproval?.summary || '')"
+            @cancel="chat.cancelPlan(m.id)"
+          />
           <!-- 任务规划进度条：计划步骤 pending/running/done + 命中数 -->
           <div v-if="m.role === 'assistant' && m.planSteps && m.planSteps.length" class="plan-strip">
             <div class="plan-head">
@@ -282,6 +305,17 @@ function onKey(e: KeyboardEvent) {
             @click="chat.togglePlanner()"
           >
             <span>Plan</span>
+          </button>
+          <button
+            type="button"
+            class="plan-toggle"
+            :class="{ on: chat.planApproval }"
+            :title="chat.planApproval
+              ? t('chat.planApproval.tip.on', '计划审批已开启：研究任务先生成计划，你确认后才执行', 'Plan approval ON: research tasks wait for your review before running')
+              : t('chat.planApproval.tip.off', '计划审批已关闭：计划自动执行', 'Plan approval OFF: plans run automatically')"
+            @click="chat.togglePlanApproval()"
+          >
+            <span>{{ t('chat.planApproval.toggle', '审批', 'Approve') }}</span>
           </button>
           <div class="rag-group">
             <span class="rag-label">知识库</span>

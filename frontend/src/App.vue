@@ -7,6 +7,7 @@ import {
 } from 'naive-ui'
 import { useSettingsStore } from '@/stores/settings'
 import { useSessionsStore } from '@/stores/sessions'
+import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useAuthStore } from '@/stores/auth'
 import ChatHistory from '@/components/ChatHistory.vue'
@@ -19,6 +20,9 @@ import SettingsDrawer from '@/components/SettingsDrawer.vue'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const chat = useChatStore()
+// 当前页面所在会话是否正在流式输出（Esc 中断）
+const streamingHere = computed(() => chat.streamingHere)
 
 const isLoginPage = computed(() => route.name === 'login')
 
@@ -35,7 +39,14 @@ const naiveOverrides = computed(() => ({
     successColor: BRAND_BLUE,
     successColorHover: '#60a5fa',
     successColorPressed: '#2563eb',
+    // 全局圆角：按钮/输入框/开关等 Naive UI 组件统一圆润外观
+    borderRadius: '10px',
+    borderRadiusSmall: '8px',
   },
+  Button: { borderRadiusMedium: '10px', borderRadiusSmall: '8px', borderRadiusTiny: '8px' },
+  Input: { borderRadius: '10px' },
+  Tag: { borderRadius: '8px' },
+  Popconfirm: { borderRadius: '10px' },
 }))
 
 
@@ -48,7 +59,7 @@ function onGlobalKey(e: KeyboardEvent) {
     return
   }
   if (e.key === 'Escape' && streamingHere.value) {
-    chat.abortStream?.()
+    chat.abortCtl?.abort()
   }
 }
 window.addEventListener('keydown', onGlobalKey)
@@ -152,7 +163,7 @@ const paletteOpen = ref(false)
               <span v-else class="theme-icon">☾</span>
             </button>
             <router-link to="/notes" custom v-slot="{ navigate }"><n-button quaternary size="small" @click="navigate">笔记</n-button></router-link>
-            <n-button quaternary size="small" @click="settingsOpen = true">设置</n-button>
+            <n-button quaternary size="small" @click="settings.uiSettingsOpen = true">设置</n-button>
             <n-text depth="3" style="font-size: 12px">{{ auth.phone }}</n-text>
             <n-button quaternary size="small" @click="handleLogout">退出</n-button>
           </n-space>

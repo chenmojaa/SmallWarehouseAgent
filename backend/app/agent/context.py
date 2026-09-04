@@ -190,7 +190,10 @@ def build_messages(instructions: str,
     parts.append(line)
 
   # AGENTS.md / project standing instructions (Codex CLI / Claude Code).
-  rules = (project_rules or "").strip()
+  # 兼容 RuleSet 对象（.text 为合并文本）与旧版 str
+  rules = project_rules if isinstance(project_rules, str) else (
+      getattr(project_rules, "text", "") or "")
+  rules = rules.strip()
   if rules:
     parts.append("[project rules - AGENTS.md]\n" + rules[:6000])
   inv = (inventory or "").strip()

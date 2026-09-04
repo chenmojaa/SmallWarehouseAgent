@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useMessage, NCard, NSpace, NButton, NInput, NSelect, NTag, NEmpty, NSpin, NPopconfirm, NCode, NText } from 'naive-ui'
 import { get, postJson, patchJson, deleteReq } from '@/api/client'
@@ -261,7 +261,7 @@ onMounted(() => {
   font-size: 12px;
   background: rgba(127, 127, 127, 0.06);
   padding: 8px 10px;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 .bg-log-line {
   white-space: pre-wrap;

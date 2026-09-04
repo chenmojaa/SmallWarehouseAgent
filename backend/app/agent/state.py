@@ -30,6 +30,7 @@ class AgentState(TypedDict, total=False):
   plan_status: list                 # per-step execution records: [{query, hits, new_chunks}]
   replan_stalled: bool              # replan loop could not produce a new query -> stop
   use_planner: bool | None          # per-request override; None = follow HD_PLANNER_ENABLED
+  plan_override: dict | None        # HITL: {"summary": str, "steps": [str]}; user-approved plan, skips LLM planning
 
   # ---- retrieval results ----
   retrieved_chunks: list

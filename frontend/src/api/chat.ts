@@ -21,6 +21,7 @@ export interface ChatRequest {
   model?: string | null
   use_rag?: boolean
   use_planner?: boolean | null
+  plan_override?: PlanOverridePayload | null
   session_id?: string | null
   base_url?: string | null
   api_key?: string | null
@@ -28,6 +29,20 @@ export interface ChatRequest {
   embedding_model?: string | null
   embedding_base_url?: string | null
   agent_permission?: 'default' | 'full'
+}
+
+/** HITL 计划审批：用户批准/编辑后的计划（阶段 2 传入） */
+export interface PlanOverridePayload {
+  summary?: string
+  steps: string[]
+}
+
+/** HITL 计划审批阶段 1：计划预览响应 */
+export interface PlanPreviewResponse {
+  needs_plan: boolean
+  intent: string
+  plan_summary?: string
+  steps?: string[]
 }
 
 export interface StageEvent {
@@ -114,6 +129,24 @@ export async function respondPermission(requestId: string, approve: boolean): Pr
   return postJson<{ ok: boolean }>('/chat/permission', { request_id: requestId, approve })
 }
 
+/** HITL 计划审批阶段 1：预览计划（只读，不写会话） */
+export async function planPreview(req: ChatRequest, signal?: AbortSignal): Promise<PlanPreviewResponse> {
+  return postJson<PlanPreviewResponse>('/chat/plan-preview', {
+    messages: req.messages,
+    provider: req.provider || undefined,
+    model: req.model || undefined,
+    use_rag: req.use_rag !== false,
+    use_planner: true,
+    session_id: req.session_id || undefined,
+    base_url: req.base_url || undefined,
+    api_key: req.api_key || undefined,
+    reasoning_level: req.reasoning_level || undefined,
+    embedding_model: req.embedding_model || undefined,
+    embedding_base_url: req.embedding_base_url || undefined,
+    agent_permission: req.agent_permission || "default",
+  }, signal)
+}
+
 // 移除 <think>...</think> 思考段落（配对的 + 未闭合的尾部）
 export function stripThink(s: string): string {
   if (!s) return s
@@ -131,6 +164,7 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
     model: req.model || undefined,
     use_rag: req.use_rag !== false,
     use_planner: req.use_planner === undefined ? undefined : req.use_planner,
+    plan_override: req.plan_override || undefined,
     session_id: req.session_id || undefined,
     base_url: req.base_url || undefined,
     api_key: req.api_key || undefined,

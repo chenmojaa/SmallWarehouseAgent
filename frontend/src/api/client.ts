@@ -67,11 +67,12 @@ function throwIfUnauthorized(status: number) {
   if (status === 401) handleUnauthorized()
 }
 
-export async function postJson<T>(path: string, body: unknown): Promise<T> {
+export async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
+    signal,
   })
   throwIfUnauthorized(res.status)
   if (!res.ok) throw new Error(res.status + " " + (await res.text()))
