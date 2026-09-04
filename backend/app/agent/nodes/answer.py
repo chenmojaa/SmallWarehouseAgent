@@ -1,4 +1,4 @@
-﻿"""Answer node - LangChain chat model with optional tool-calling.
+"""Answer node - LangChain chat model with optional tool-calling.
 
 Two entry points are kept on purpose:
 
@@ -74,6 +74,17 @@ def _build_messages(state: AgentState):
   ]
   tools = load_tools() if settings.tools_enabled else []
   inventory = inventory_text() if settings.tools_enabled else ""
+  # Sub-agent mode gets a restricted tool palette. The general profile
+  # keeps every tool; explore/plan shed obviously-mutating tools so the
+  # helper cannot accidentally fs_write / delete a note while summarising.
+  subagent_mode = state.get("subagent_mode")
+  if subagent_mode and tools:
+    try:
+      from app.agent.subagents import _filter_tools_for_mode
+      allowed = set(_filter_tools_for_mode([t.name for t in tools], subagent_mode))
+      tools = [t for t in tools if t.name in allowed]
+    except Exception:
+      pass
   msgs = build_messages(
     instructions=ANSWER_INSTRUCTIONS,
     chunks=chunks,
