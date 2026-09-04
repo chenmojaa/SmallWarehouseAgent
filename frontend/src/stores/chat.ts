@@ -3,6 +3,7 @@ import { chatStream, planPreview, respondPermission, stripThink, type ChatMessag
 import { useSettingsStore } from './settings'
 import { useModelsStore } from './models'
 import { useSessionsStore } from './sessions'
+import { getApiKey } from '@/api/client'
 
 export interface ToolCallItem {
   name: string
@@ -162,7 +163,7 @@ export const useChatStore = defineStore("chat", {
         use_planner: this.usePlanner,
         session_id: this.sessionId,
         base_url: sel?.baseUrl ?? null,
-        api_key: sel?.apiKey ?? null,
+        api_key: (sel?.apiKey && !sel.apiKey.includes('*')) ? sel.apiKey : (getApiKey() || null),
         reasoning_level: sel?.reasoning ?? null,
         embedding_model: sel?.embeddingModel ?? null,
         embedding_base_url: sel?.baseUrl ?? null,
