@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response
+from fastapi import Query,  APIRouter, HTTPException, UploadFile, File, Header, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import select

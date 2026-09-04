@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import Query, APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.storage.db import (
