@@ -344,9 +344,16 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
         yield "event: done\ndata: {}\n\n"
       return StreamingResponse(_ack_stream2(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-  api_key = (body.api_key or x_api_key or "").strip() or None
+  _req_key = (body.api_key or x_api_key or "").strip() or None
+  if _req_key is None:
+    try:
+      from app.storage import llm_config_store as _lcs
+      _req_key = _lcs.get_api_key() or None
+    except Exception:
+      pass
+  api_key = _req_key
   base_url = (body.base_url or "").strip() or None
-  emb_key = (body.api_key or x_api_key or "").strip() or None
+  emb_key = _req_key
   emb_base = (body.embedding_base_url or body.base_url or "").strip() or None
   emb_model = (body.embedding_model or "").strip() or None
 
