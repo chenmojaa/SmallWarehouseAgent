@@ -580,7 +580,7 @@ async def chat(body: ChatRequest, x_api_key: str | None = Header(None, alias="X-
     retrieved = []
     if body.use_rag and query:
       try:
-        retrieved = hybrid_search(query, top_k=5, api_key=emb_key,
+        retrieved = hybrid_search(query, top_k=3, api_key=emb_key,
                                   base_url=emb_base, model=emb_model)
       except Exception as e:
         _log.warning("hybrid_search failed: %s", e)
