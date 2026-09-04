@@ -437,3 +437,22 @@ class TestMigrateTokenVersion(unittest.TestCase):
                 conn.close()
             except Exception:
                 pass
+class AuthModuleImportsTests(unittest.TestCase):
+    """Regression for the bug where app.api.auth used get_session() but
+    never imported it. Every token verify hit a NameError that the broad
+    `except Exception` in verify_token silently swallowed, so every
+    /api/auth/me returned 401 and the router guard bounced users back
+    to /login immediately after a successful login.
+    """
+
+    def test_get_session_is_imported_in_auth_module(self):
+        import app.api.auth as auth
+        self.assertTrue(
+            hasattr(auth, "get_session"),
+            "app.api.auth must import get_session (used by verify_token)",
+        )
+
+    def test_auth_module_imports_cleanly(self):
+        # Importing the module should not raise NameError or ImportError.
+        import importlib
+        importlib.reload(importlib.import_module("app.api.auth"))
